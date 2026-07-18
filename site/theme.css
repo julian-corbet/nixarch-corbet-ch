@@ -1,0 +1,51 @@
+/* =====================================================================
+   nixarch / site / theme.css
+   Project-specific theme override, loaded between tokens.css and
+   page.css. Only touches the tokens documented as "safe to override"
+   in the design-corbet-ch project-pages theming contract — retints
+   the accent hue to a cyan/teal, distinct from dotkeeper's emerald.
+
+   Load order:
+     <link rel="stylesheet" href="tokens.css">
+     <link rel="stylesheet" href="theme.css">
+     <link rel="stylesheet" href="page.css">
+   ===================================================================== */
+
+:root {
+  /* Dark mode (and default) accent — teal-400. */
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-dim: rgba(45, 212, 191, 0.12);
+  --accent-glow: rgba(45, 212, 191, 0.08);
+  --accent-text: #0b1120;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* Darker teal for light mode — #0f766e on #ffffff is ~5.5:1,
+       comfortably AA for normal text. */
+    --accent: #0f766e;
+    --accent-hover: #115e59;
+    --accent-dim: rgba(15, 118, 110, 0.08);
+    --accent-glow: rgba(15, 118, 110, 0.06);
+    --accent-text: #ffffff;
+  }
+}
+
+/* Mirror both variants for the explicit data-theme toggle, so it wins
+   over the OS media query in both directions. */
+:root[data-theme="dark"] {
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-dim: rgba(45, 212, 191, 0.12);
+  --accent-glow: rgba(45, 212, 191, 0.08);
+  --accent-text: #0b1120;
+}
+
+:root[data-theme="light"] {
+  --accent: #0f766e;
+  --accent-hover: #115e59;
+  --accent-dim: rgba(15, 118, 110, 0.08);
+  --accent-glow: rgba(15, 118, 110, 0.06);
+  --accent-text: #ffffff;
+}

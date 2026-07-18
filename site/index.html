@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>nixarch &mdash; declarative Arch/CachyOS workstations, the Nix way</title>
+  <meta name="description" content="nixarch is a pre-alpha, work-in-progress base layer for running Arch-family desktops and laptops under Nix control without NixOS: system-manager for the system layer, home-manager for the user layer.">
+
+  <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+
+  <meta property="og:title" content="nixarch">
+  <meta property="og:description" content="Declarative Arch/CachyOS workstations, managed the Nix way — a pre-alpha base layer built on system-manager and home-manager.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nixarch.corbet.ch">
+
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="page.css">
+</head>
+<body>
+
+<header class="hero">
+  <nav>
+    <a href="/" class="nav-brand">nixarch</a>
+    <div class="nav-links">
+      <a href="https://github.com/julian-corbet/nixarch-corbet-ch">GitHub</a>
+      <a href="#status">Status</a>
+      <a href="#roadmap">Roadmap</a>
+    </div>
+  </nav>
+
+  <div class="hero-content">
+    <h1>nixarch</h1>
+    <p class="tagline">Declarative Arch/CachyOS workstations, managed the Nix way.</p>
+    <p class="subtitle">
+      A reusable base for running Arch-family desktops and laptops under
+      Nix control without switching to NixOS: <code>system-manager</code>
+      for the system layer, <code>home-manager</code> for the user layer,
+      plus patterns for CachyOS-specific concerns expressed as data.
+    </p>
+    <div class="cta">
+      <a href="#status" class="btn btn-primary">Read the Status</a>
+      <a href="https://github.com/julian-corbet/nixarch-corbet-ch" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="status" class="how-it-works">
+  <div class="container">
+    <h2>Status: pre-alpha</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">!</div>
+        <h3>Not yet consumable</h3>
+        <p>
+          This repository is a scaffold. It is being extracted from a
+          private, working fleet configuration, one module at a time.
+          There is no installable release, no module set, and no
+          documented usage yet.
+        </p>
+      </div>
+      <div class="step">
+        <div class="step-num">!</div>
+        <h3>Real usage, no packaging</h3>
+        <p>
+          The pattern behind nixarch runs daily on real Arch/CachyOS
+          machines today &mdash; it just isn't public or generalized
+          yet. That extraction work is what this repository tracks.
+        </p>
+      </div>
+      <div class="step">
+        <div class="step-num">!</div>
+        <h3>Flake skeleton only</h3>
+        <p>
+          <code>flake.nix</code> currently exports empty module
+          attrsets with a doc comment explaining they're placeholders.
+          It evaluates cleanly; it does not do anything yet.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="container">
+    <h2>Why this exists</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>system-manager on Arch, for real</h3>
+        <p>
+          <code>system-manager</code> is young, and almost nobody has
+          published a serious, real-world configuration built on it for
+          an Arch-family distro. nixarch aims to be a worked, opinionated
+          example instead of a toy demo.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Nix without NixOS</h3>
+        <p>
+          The goal is declarative system services and files plus a
+          declarative user environment, layered on top of a distro that
+          keeps its own package manager and its own kernel/driver story
+          &mdash; not a NixOS migration.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>CachyOS concerns as data</h3>
+        <p>
+          v3/znver-optimized repositories, kernel and scheduler choices,
+          and other CachyOS-specific decisions are meant to be expressed
+          as configuration data consumed by the modules, not hardcoded
+          into them.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap" class="install">
+  <div class="container">
+    <h2>Roadmap (planned, not yet built)</h2>
+    <div class="install-grid">
+      <div class="install-method">
+        <h3>system-manager base module</h3>
+        <p>
+          A minimal, documented <code>system-manager</code> configuration
+          covering system services and files that are safe to apply on
+          an unmodified Arch/CachyOS install.
+        </p>
+      </div>
+      <div class="install-method">
+        <h3>home-manager base module</h3>
+        <p>
+          A user-layer module extracted from real daily-driver dotfiles
+          and packages, generalized away from any one machine's specifics.
+        </p>
+      </div>
+      <div class="install-method">
+        <h3>CachyOS data patterns</h3>
+        <p>
+          A documented, data-driven way to express v3/znver repository
+          selection and kernel/scheduler choice, instead of one-off shell
+          scripts.
+        </p>
+      </div>
+    </div>
+    <p style="margin-top: var(--space-6); color: var(--text-dim);">
+      None of the above exists in this repository yet. This section will
+      be replaced with real install instructions once there is something
+      to install.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <div class="footer-links">
+      <a href="https://github.com/julian-corbet/nixarch-corbet-ch">Source</a>
+      <a href="https://github.com/julian-corbet/nixarch-corbet-ch/issues">Issues</a>
+    </div>
+    <p>
+      <a href="https://github.com/julian-corbet/nixarch-corbet-ch/blob/main/LICENSE">MIT</a> &middot;
+      <a href="https://github.com/julian-corbet">Julian Corbet</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
