@@ -27,39 +27,69 @@ story. Nix only owns the declarative layers on top.
 
 ## Status
 
-**Pre-alpha scaffold.** This repository is being extracted from a private
-fleet configuration, one module at a time. As of this writing:
+**Pre-alpha.** This repository is being extracted from a private
+configuration, one module at a time. As of this writing:
 
-- There is **no installable module set** and no documented usage.
-- `flake.nix` exports empty `lib`, `nixosModules`, and `homeManagerModules`
-  attrsets, explicitly marked as placeholders — it evaluates cleanly
-  (`nix flake check` passes) but does not do anything yet.
+- Two real `system-manager` modules have landed: `gshadow-sync` (heals
+  `/etc/gshadow` after `userborn` writes `/etc/group`) and `device-gids`
+  (pins and migrates shared device groups to caller-chosen gids, with the
+  Arch tty/devpts lockstep that goes with it). See Usage below.
+- Everything else is still **not built**: no `home-manager` base module,
+  no CachyOS data patterns, no worked end-to-end example machine config.
 - The project page in `site/` describes the vision honestly as
-  not-yet-consumable; it is not a marketing page for a finished tool.
+  not-yet-consumable as a whole; it is not a marketing page for a
+  finished tool.
 
 The pattern behind nixarch runs daily on real Arch/CachyOS machines today.
 What's missing is the generalization and extraction work needed to make
 it usable by anyone else, which is what this repository tracks.
 
+## Usage
+
+The two landed modules are plain `system-manager` modules (and, for
+`gshadow-sync`, a plain NixOS module too — see below). Import them and
+turn them on:
+
+```nix
+{
+  imports = [ nixarch.systemManagerModules.gshadow-sync ];
+  nixarch.gshadowSync.enable = true;
+}
+```
+
+```nix
+{
+  imports = [ nixarch.systemManagerModules.device-gids ];
+  nixarch.deviceGidsEnable = true;
+  nixarch.deviceGids = {
+    render = 400;
+    video = 401;
+    tty = 5; # optional: including "tty" also enables the devpts lockstep
+  };
+}
+```
+
+`gshadow-sync` is also exported under `nixarch.nixosModules.gshadow-sync`
+for the same reason it needs no fork on NixOS: NixOS realises users with
+the same `userborn` and has the same `/etc/gshadow` blind spot.
+
 ## Roadmap
 
 Planned, not yet built:
 
-- **system-manager base module** — a minimal, documented configuration
-  covering system services and files, safe to apply on an unmodified
-  Arch/CachyOS install.
 - **home-manager base module** — a user-layer module extracted from real
   daily-driver dotfiles and packages, generalized away from any one
   machine's specifics.
 - **CachyOS data patterns** — a documented, data-driven way to express
   v3/znver repository selection and kernel/scheduler choice.
+- Additional `system-manager` modules beyond the two landed so far.
 - Worked, runnable examples once the above land.
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; currently empty placeholder outputs only. |
+| `flake.nix` | Flake entry point; exports the two landed `system-manager` modules (see Usage) plus still-empty `lib`/`homeManagerModules` placeholders. |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |
 | `site/` | The project page (`nixarch.corbet.ch`), vendored from the shared `design-corbet-ch` project-pages base. |

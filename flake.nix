@@ -13,13 +13,23 @@
       ];
     in
     {
-      # Extraction is in progress: this repo does not yet ship any
-      # system-manager or home-manager modules. These attrsets are
-      # intentionally empty placeholders — real content lands here
-      # module by module as it is pulled out of the private fleet
-      # configuration it started life in. See the Roadmap in README.md.
+      # Extraction is in progress. The first two real modules have landed
+      # under system-manager: a device-gid registry and a gshadow/group
+      # hygiene fix. Everything else here is still an intentionally empty
+      # placeholder — real content lands module by module as it is
+      # generalized out of the private configuration it started life in.
+      # See the Roadmap in README.md.
       lib = { };
-      nixosModules = { };
+      systemManagerModules = {
+        gshadow-sync = ./modules/gshadow-sync.nix;
+        device-gids = ./modules/device-gids.nix;
+      };
+      nixosModules = {
+        # NixOS realises users with the same userborn as system-manager and
+        # has the same /etc/gshadow blind spot, so this module carries over
+        # as-is — no NixOS-specific fork needed.
+        gshadow-sync = ./modules/gshadow-sync.nix;
+      };
       homeManagerModules = { };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
