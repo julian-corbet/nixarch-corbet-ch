@@ -1,14 +1,13 @@
 /* =====================================================================
    nixarch / site / theme.css
-   Project-specific theme override, loaded between tokens.css and
-   page.css. Only touches the tokens documented as "safe to override"
-   in the design-corbet-ch project-pages theming contract — retints
-   the accent hue to a cyan/teal, distinct from dotkeeper's emerald.
+   Project-specific theme override for the foss/v1 design system.
+   Only touches the tokens documented as "safe to override" in the
+   design-corbet-ch project-pages theming contract — retints the
+   accent hue to a cyan/teal, distinct from dotkeeper's emerald.
 
    Load order:
-     <link rel="stylesheet" href="tokens.css">
-     <link rel="stylesheet" href="theme.css">
-     <link rel="stylesheet" href="page.css">
+     <link rel="stylesheet" href="https://v1.foss.design.corbet.ch/assets/base.css">
+     <link rel="stylesheet" href="./theme.css">
    ===================================================================== */
 
 :root {
