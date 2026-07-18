@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <title>nixarch &mdash; declarative Arch/CachyOS workstations, the Nix way</title>
-  <meta name="description" content="nixarch is a pre-alpha, work-in-progress base layer for running Arch-family desktops and laptops under Nix control without NixOS: system-manager for the system layer, home-manager for the user layer.">
+  <meta name="description" content="nixarch is a pre-alpha base layer for running Arch-family desktops and laptops under Nix control without NixOS: system-manager for the system layer, home-manager for the user layer. Two real system-manager modules have landed so far.">
 
   <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 
   <meta property="og:title" content="nixarch">
-  <meta property="og:description" content="Declarative Arch/CachyOS workstations, managed the Nix way — a pre-alpha base layer built on system-manager and home-manager.">
+  <meta property="og:description" content="Declarative Arch/CachyOS workstations, managed the Nix way — a pre-alpha base built on system-manager and home-manager, with two real modules landed so far.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://nixarch.corbet.ch">
 
@@ -53,31 +53,36 @@
     <h2>Status: pre-alpha</h2>
     <div class="steps">
       <div class="step">
-        <div class="step-num">!</div>
-        <h3>Not yet consumable</h3>
+        <div class="step-num">✓</div>
+        <h3>Two real modules have landed</h3>
         <p>
-          This repository is a scaffold. It is being extracted from a
-          private, working fleet configuration, one module at a time.
-          There is no installable release, no module set, and no
-          documented usage yet.
+          <code>device-gids</code> and <code>gshadow-sync</code> are real,
+          working <code>system-manager</code> modules with documented
+          options and usage &mdash; see the modules below. They are not a
+          demo; the pattern behind them runs daily on a real Arch/CachyOS
+          machine today.
         </p>
       </div>
       <div class="step">
         <div class="step-num">!</div>
-        <h3>Real usage, no packaging</h3>
+        <h3>Everything else is still not built</h3>
         <p>
-          The pattern behind nixarch runs daily on real Arch/CachyOS
-          machines today &mdash; it just isn't public or generalized
-          yet. That extraction work is what this repository tracks.
+          No <code>home-manager</code> base module, no CachyOS-specific
+          data patterns, no worked end-to-end example machine
+          configuration yet. This repository is being extracted from a
+          private configuration one module at a time, not delivered as a
+          finished tool.
         </p>
       </div>
       <div class="step">
         <div class="step-num">!</div>
-        <h3>Flake skeleton only</h3>
+        <h3>Not a drop-in base yet</h3>
         <p>
-          <code>flake.nix</code> currently exports empty module
-          attrsets with a doc comment explaining they're placeholders.
-          It evaluates cleanly; it does not do anything yet.
+          You can import and use the two landed modules on their own
+          today (see Usage in the README). What you cannot do yet is
+          point a whole Arch/CachyOS machine at nixarch and get a
+          complete declarative base &mdash; that's the rest of the
+          roadmap below.
         </p>
       </div>
     </div>
@@ -86,33 +91,45 @@
 
 <section class="features">
   <div class="container">
-    <h2>Why this exists</h2>
+    <h2>What actually works today</h2>
     <div class="feature-grid">
+      <div class="feature">
+        <h3>device-gids</h3>
+        <p>
+          Pins shared device groups (<code>render</code>,
+          <code>video</code>, and similar) to a caller-supplied gid map,
+          and keeps them there. A oneshot <code>groupmod</code> migrates
+          any pre-existing group to the requested gid &mdash; declaring a
+          gid alone isn't enough, since <code>userborn</code> only creates
+          missing groups at the declared gid and never renumbers an
+          existing one. Including <code>tty</code> in the map also enables
+          the devpts remount lockstep Arch needs to make the live
+          pseudo-terminal gid track the group you chose.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>gshadow-sync</h3>
+        <p>
+          Heals <code>/etc/gshadow</code> after <code>userborn</code>
+          writes <code>/etc/group</code>: on Arch, <code>system-manager</code>
+          realises groups through <code>userborn</code>, which never
+          touches <code>/etc/gshadow</code>, so every group it creates
+          leaves the daily <code>shadow.service</code> hygiene check
+          permanently red. This module runs an idempotent
+          <code>grpconv</code> that only touches the file when the two
+          have actually diverged, and carries over to NixOS unchanged for
+          the same reason.
+        </p>
+      </div>
       <div class="feature">
         <h3>system-manager on Arch, for real</h3>
         <p>
           <code>system-manager</code> is young, and almost nobody has
           published a serious, real-world configuration built on it for
-          an Arch-family distro. nixarch aims to be a worked, opinionated
-          example instead of a toy demo.
-        </p>
-      </div>
-      <div class="feature">
-        <h3>Nix without NixOS</h3>
-        <p>
-          The goal is declarative system services and files plus a
-          declarative user environment, layered on top of a distro that
-          keeps its own package manager and its own kernel/driver story
-          &mdash; not a NixOS migration.
-        </p>
-      </div>
-      <div class="feature">
-        <h3>CachyOS concerns as data</h3>
-        <p>
-          v3/znver-optimized repositories, kernel and scheduler choices,
-          and other CachyOS-specific decisions are meant to be expressed
-          as configuration data consumed by the modules, not hardcoded
-          into them.
+          an Arch-family distro. The two modules above are the start of a
+          worked, opinionated base instead of a toy demo &mdash; more
+          will land the same way, extracted from daily use rather than
+          written speculatively.
         </p>
       </div>
     </div>
@@ -124,11 +141,11 @@
     <h2>Roadmap (planned, not yet built)</h2>
     <div class="install-grid">
       <div class="install-method">
-        <h3>system-manager base module</h3>
+        <h3>More system-manager modules</h3>
         <p>
-          A minimal, documented <code>system-manager</code> configuration
-          covering system services and files that are safe to apply on
-          an unmodified Arch/CachyOS install.
+          Additional modules beyond <code>device-gids</code> and
+          <code>gshadow-sync</code>, extracted from the same real
+          Arch/CachyOS machine as they prove themselves in daily use.
         </p>
       </div>
       <div class="install-method">
