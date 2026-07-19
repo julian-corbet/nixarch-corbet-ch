@@ -47,31 +47,75 @@ it usable by anyone else, which is what this repository tracks.
 ## Usage
 
 The two landed modules are plain `system-manager` modules (and, for
-`gshadow-sync`, a plain NixOS module too — see below). Import them and
-turn them on:
+`gshadow-sync`, a plain NixOS module too — see below). Both are imported as
+regular nixpkgs modules; add nixarch to your system-manager flake as an input,
+then reference them in your configuration.
+
+### gshadow-sync
+
+Heals `/etc/gshadow` inconsistencies that arise when `userborn` writes
+`/etc/group` but not `/etc/gshadow`. See [`studies/gshadow-under-userborn.md`](studies/gshadow-under-userborn.md)
+for the full rationale.
+
+Add to your system-manager configuration:
 
 ```nix
 {
-  imports = [ nixarch.systemManagerModules.gshadow-sync ];
+  imports = [ inputs.nixarch.systemManagerModules.gshadow-sync ];
+  
   nixarch.gshadowSync.enable = true;
 }
 ```
 
+That's all — once enabled, it runs idempotently on every boot and when you
+call `system-manager switch`, plus it hooks into `shadow.service` to re-heal
+before the daily check.
+
+### device-gids
+
+Pins shared device groups (render, video, input, tty, etc.) to stable,
+caller-chosen gids. Automatically migrates pre-existing groups via `groupmod`
+if they land at a different gid, and includes an optional devpts lockstep
+to keep `/dev/pts` in sync when remumbering `tty`.
+
+Add to your system-manager configuration:
+
 ```nix
 {
-  imports = [ nixarch.systemManagerModules.device-gids ];
+  imports = [ inputs.nixarch.systemManagerModules.device-gids ];
+  
   nixarch.deviceGidsEnable = true;
+  
+  # Map group name to its canonical gid.
+  # Including "tty" also enables the /dev/pts remount service.
   nixarch.deviceGids = {
-    render = 400;
-    video = 401;
-    tty = 5; # optional: including "tty" also enables the devpts lockstep
+    render = 500;  # DRI devices
+    video = 501;   # GPU, framebuffer
+    input = 502;   # Input devices
+    tty = 503;     # Pseudo-terminals (triggers devpts lockstep)
   };
+  
+  # Optional: customize devpts mount modes (defaults shown).
+  # Only used if "tty" is in deviceGids above.
+  nixarch.ttyDevpts.mode = "620";
+  nixarch.ttyDevpts.ptmxmode = "666";
 }
 ```
 
-`gshadow-sync` is also exported under `nixarch.nixosModules.gshadow-sync`
-for the same reason it needs no fork on NixOS: NixOS realises users with
-the same `userborn` and has the same `/etc/gshadow` blind spot.
+The module has no opinion on the actual gid numbers — those are entirely
+your choice. An empty `deviceGids` map makes it a no-op.
+
+### Full example
+
+See [`examples/system-manager.nix`](examples/system-manager.nix) for a minimal,
+annotated configuration showing both modules in action.
+
+### NixOS portability
+
+`gshadow-sync` is also exported under `nixarch.nixosModules.gshadow-sync`.
+NixOS realises users with the same userborn and has the same `/etc/gshadow`
+blind spot, so the module carries over as-is — only the import path differs,
+not the logic or configuration.
 
 ## Roadmap
 
