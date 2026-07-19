@@ -24,6 +24,7 @@
         gshadow-sync = ./modules/gshadow-sync.nix;
         device-gids = ./modules/device-gids.nix;
         packages = ./modules/packages.nix;
+        foreign-service = ./modules/foreign-service.nix;
       };
       nixosModules = {
         # NixOS realises users with the same userborn as system-manager and
