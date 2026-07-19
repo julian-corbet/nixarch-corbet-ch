@@ -171,6 +171,11 @@ in
       # `switch`, not only at boot — sysinit is already past by the time `switch`
       # runs, same reasoning as the other oneshots in this project.
       wantedBy = [ "multi-user.target" ];
+      # system-manager injects a nix-store-only PATH (no /usr/bin) into every unit
+      # it declares, so `pacman`/`runuser` (and the coreutils the prune step uses)
+      # would not resolve on a real box. Force the normal host PATH — same fix the
+      # foreign-service module documents. These are all host tools by nature.
+      environment.PATH = lib.mkForce "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
