@@ -1,55 +1,60 @@
 # nixarch
 
-Declarative Arch/CachyOS workstations, managed the Nix way.
+Arch/AUR's rolling breadth, Nix's declarative config. Reproducible, software-rich workstations for ML engineers and data scientists.
 
 ## Vision
 
-`system-manager` is young, and almost nobody has published a serious,
-real-world configuration built on it for an Arch-family distro. **nixarch**
-aims to be a worked, opinionated base extracted from machines that
-actually run this way daily — not a toy demo.
+**nixarch** merges Arch/AUR's rolling package access (nearly all software,
+lands faster than nixpkgs) with Nix's declarative system and user layers,
+enabling reproducible workstations without switching to NixOS. Prototype
+AI-engineer machines: access to nearly everything, tidied and reproducible.
 
-The goal is a reusable base layer for running Arch-family desktops and
-laptops under Nix control *without* switching to NixOS:
+The goal is a reusable base layer built on five real, working modules:
 
+- **`packages`** — the core USP. Declarative access to Arch's entire rolling
+  AUR breadth. Declare packages once, get them reproducibly across machines
+  via Nix without abandoning Arch's "nearly everything" package culture.
 - **`system-manager`** as the system layer — services and system files,
-  declared and applied on top of an otherwise ordinary Arch/CachyOS
-  install.
-- **`home-manager`** as the user layer — dotfiles and user packages,
-  declared the same way you would on NixOS, on a distro that isn't.
-- **CachyOS-specific concerns expressed as data** — v3/znver-optimized
-  repository selection, kernel and scheduler choice, and similar
-  distro-specific decisions, driven by configuration rather than
-  hardcoded into the modules.
-
-The distro keeps its own package manager, its own kernel, its own driver
-story. Nix only owns the declarative layers on top.
+  declared and applied on top of an otherwise ordinary Arch/CachyOS install.
+- **`home-manager`** as the user layer — dotfiles and user packages, declared
+  the same way you would on NixOS, on a distro that isn't.
+- **`device-gids` and `gshadow-sync`** — real, foundational system-manager
+  modules solving Arch/userborn quirks: stable device group ids and
+  `/etc/gshadow` consistency.
+- **`foreign-service`** — declarative configuration over pacman-managed
+  systemd units, treating distro services as data.
+- **`ai-workstation` profile** — a curated starter combining the modules for
+  ML and data-science workflows: GPU support, dev toolchains, scientific
+  stacks, CUDA/ROCm. Starting points, not dogma.
 
 ## Status
 
-**Pre-alpha.** This repository is being extracted from a private
-configuration, one module at a time. As of this writing:
+**Pre-alpha, five real modules landed.** This repository is being extracted
+from machines that actually run this way daily — one module at a time — not
+a toy demo or marketing page. As of this writing:
 
-- Two real `system-manager` modules have landed: `gshadow-sync` (heals
-  `/etc/gshadow` after `userborn` writes `/etc/group`) and `device-gids`
-  (pins and migrates shared device groups to caller-chosen gids, with the
-  Arch tty/devpts lockstep that goes with it). See Usage below.
-- Everything else is still **not built**: no `home-manager` base module,
-  no CachyOS data patterns, no worked end-to-end example machine config.
-- The project page in `site/` describes the vision honestly as
-  not-yet-consumable as a whole; it is not a marketing page for a
-  finished tool.
+- **Five working modules** have landed:
+  - `packages` (declarative Arch/AUR access — the core USP)
+  - `device-gids` (stable device group ids, with optional devpts lockstep)
+  - `gshadow-sync` (heals `/etc/gshadow` after `userborn` writes `/etc/group`)
+  - `foreign-service` (declarative config over pacman systemd units)
+  - `ai-workstation` profile (starter config for ML/data-science workflows)
+- Each module is real, working code with documented options. Not speculative;
+  the patterns run daily in production.
+- The `ai-workstation` profile's package lists are starting points, not gospel.
+- Still **not built**: integration test suite, `home-manager` base module, or
+  end-to-end example machine config.
 
-The pattern behind nixarch runs daily on real Arch/CachyOS machines today.
-What's missing is the generalization and extraction work needed to make
-it usable by anyone else, which is what this repository tracks.
+What's landed is usable today on its own (see Usage below). What's missing is
+the integration, testing, and documentation needed to make the entire stack
+consumable as a single drop-in base for a new machine.
 
 ## Usage
 
-The two landed modules are plain `system-manager` modules (and, for
-`gshadow-sync`, a plain NixOS module too — see below). Both are imported as
-regular nixpkgs modules; add nixarch to your system-manager flake as an input,
-then reference them in your configuration.
+The five modules are plain `system-manager` modules (and `gshadow-sync` is
+also a plain NixOS module — see below). Import them as regular nixpkgs
+modules: add nixarch to your system-manager flake as an input, then reference
+them in your configuration.
 
 ### gshadow-sync
 
@@ -105,6 +110,84 @@ Add to your system-manager configuration:
 The module has no opinion on the actual gid numbers — those are entirely
 your choice. An empty `deviceGids` map makes it a no-op.
 
+### packages
+
+Declarative access to Arch/AUR packages. Declare package lists once, apply
+reproducibly across machines via Nix without switching distros.
+
+```nix
+{
+  imports = [ inputs.nixarch.systemManagerModules.packages ];
+  
+  nixarch.packages.enable = true;
+  
+  # Official repos and AUR both work; nixarch handles the fetch.
+  # Package lists are starting points, not fixed.
+  nixarch.packages.core = [
+    "vim"
+    "git"
+    "tmux"
+  ];
+  
+  nixarch.packages.development = [
+    "rustup"
+    "python"
+    "just"
+  ];
+  
+  # AUR packages also supported (example; adjust for your AUR helper)
+  nixarch.packages.aur = [
+    "paru-bin"  # or your chosen AUR helper
+  ];
+}
+```
+
+### foreign-service
+
+Declarative configuration over pacman-managed systemd units. Treat distro
+services as data: configure options, enable/disable, set dependencies.
+
+```nix
+{
+  imports = [ inputs.nixarch.systemManagerModules.foreign-service ];
+  
+  nixarch.foreignServices."bluetooth" = {
+    enable = true;
+    wantedBy = [ "multi-user.target" ];
+    requiredBy = [ ];
+  };
+  
+  nixarch.foreignServices."pipewire" = {
+    enable = true;
+    wantedBy = [ "multi-user.target" ];
+  };
+}
+```
+
+### ai-workstation profile
+
+A curated starter combining all modules for ML/data-science workflows. GPU
+support, dev toolchains, scientific stacks, CUDA/ROCm.
+
+```nix
+{
+  imports = [
+    inputs.nixarch.systemManagerModules.device-gids
+    inputs.nixarch.systemManagerModules.gshadow-sync
+    inputs.nixarch.systemManagerModules.packages
+    inputs.nixarch.profiles.ai-workstation
+  ];
+  
+  # Customize the profile's package lists (they are starting points)
+  nixarch.packages.development = [ "cuda" "pytorch" ];
+  nixarch.deviceGids = {
+    render = 500;
+    video = 501;
+    input = 502;
+  };
+}
+```
+
 ### Full example
 
 See [`examples/system-manager.nix`](examples/system-manager.nix) for a minimal,
@@ -121,13 +204,18 @@ not the logic or configuration.
 
 Planned, not yet built:
 
+- **Integration test suite** — behavior-driven tests for each module in
+  isolation and in combination, run against fresh Arch/CachyOS installs.
 - **home-manager base module** — a user-layer module extracted from real
   daily-driver dotfiles and packages, generalized away from any one
   machine's specifics.
-- **CachyOS data patterns** — a documented, data-driven way to express
-  v3/znver repository selection and kernel/scheduler choice.
-- Additional `system-manager` modules beyond the two landed so far.
-- Worked, runnable examples once the above land.
+- **End-to-end example machine config** — a worked, runnable configuration
+  that imports all five modules and can bootstrap a complete workstation
+  from fresh Arch in a single apply.
+- Additional `system-manager` modules extracted from real use as they mature.
+
+Once these land, nixarch will be usable as a true drop-in base layer for new
+Arch/CachyOS machines.
 
 ## Repository layout
 
@@ -138,14 +226,14 @@ Planned, not yet built:
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |
 | `site/` | The project page (`nixarch.corbet.ch`), vendored from the shared `design-corbet-ch` project-pages base. |
 
-## Part of the corbet.ch project family
+## Related projects
 
-nixarch is one of several small, independently-usable open-source
-projects that share a common design system and house conventions.
-Related sibling projects manage a NixOS distro build (**nixnas**) and a
-generic RAM/memory-tuning NixOS module (**nixram**) — nixarch's own
-niche is the non-NixOS, Arch-family side of the same "declarative
-machines" idea.
+nixarch is one of several small, independently-usable open-source projects
+sharing a common design system. Related projects include a NixOS distro build
+(**nixnas**) and a generic RAM/memory-tuning NixOS module (**nixram**) —
+nixarch's own niche is the non-NixOS, Arch-family side of the same "declarative
+machines" idea: access to rolling Arch breadth, tidied by Nix's reproducible
+layers.
 
 ## License
 

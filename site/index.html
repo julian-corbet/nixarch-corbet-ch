@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <title>nixarch &mdash; declarative Arch/CachyOS workstations, the Nix way</title>
-  <meta name="description" content="nixarch is a pre-alpha base layer for running Arch-family desktops and laptops under Nix control without NixOS: system-manager for the system layer, home-manager for the user layer. Two real system-manager modules have landed so far.">
+  <title>nixarch &mdash; Arch/AUR breadth + Nix declarative config for reproducible AI-engineer workstations</title>
+  <meta name="description" content="nixarch merges Arch/AUR's rolling package access with Nix's declarative system and user config, enabling reproducible, software-rich workstations for ML engineers and data scientists. Pre-alpha, real modules landed: device-gids, gshadow-sync, packages, foreign-service, ai-workstation.">
 
   <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 
   <meta property="og:title" content="nixarch">
-  <meta property="og:description" content="Declarative Arch/CachyOS workstations, managed the Nix way — a pre-alpha base built on system-manager and home-manager, with two real modules landed so far.">
+  <meta property="og:description" content="Arch/AUR's rolling package breadth + Nix's declarative config = reproducible, software-rich workstations for ML engineers. Pre-alpha, five real modules landed.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://nixarch.corbet.ch">
 
@@ -32,12 +32,14 @@
 
   <div class="hero-content">
     <h1>nixarch</h1>
-    <p class="tagline">Declarative Arch/CachyOS workstations, managed the Nix way.</p>
+    <p class="tagline">Arch's AUR breadth, Nix's declarative config.</p>
     <p class="subtitle">
-      A reusable base for running Arch-family desktops and laptops under
-      Nix control without switching to NixOS: <code>system-manager</code>
-      for the system layer, <code>home-manager</code> for the user layer,
-      plus patterns for CachyOS-specific concerns expressed as data.
+      Merge fresh Arch/AUR packages (rolling, lands faster than nixpkgs,
+      ~all software) with Nix's declarative system and user layers to
+      build reproducible, software-rich workstations for ML engineers and
+      data scientists. No NixOS required: <code>system-manager</code> for
+      the system layer, <code>home-manager</code> for the user layer, and
+      data-driven profiles for distro-specific concerns.
     </p>
     <div class="cta">
       <a href="#status" class="btn btn-primary">Read the Status</a>
@@ -50,39 +52,41 @@
 
 <section id="status" class="how-it-works">
   <div class="container">
-    <h2>Status: pre-alpha</h2>
+    <h2>Status: pre-alpha, five real modules</h2>
     <div class="steps">
       <div class="step">
         <div class="step-num">✓</div>
-        <h3>Two real modules have landed</h3>
+        <h3>Five real modules have landed</h3>
         <p>
-          <code>device-gids</code> and <code>gshadow-sync</code> are real,
-          working <code>system-manager</code> modules with documented
-          options and usage &mdash; see the modules below. They are not a
-          demo; the pattern behind them runs daily on a real Arch/CachyOS
-          machine today.
+          <code>device-gids</code> (stable device group gids),
+          <code>gshadow-sync</code> (heals <code>/etc/gshadow</code>),
+          <code>packages</code> (the core USP &mdash; declarative Arch/AUR
+          package access), <code>foreign-service</code> (declarative
+          configuration over pacman units), and <code>ai-workstation</code>
+          (a starter profile tuned for ML and data-science workflows).
+          Each is real, working code with documented options. Not a demo.
         </p>
       </div>
       <div class="step">
         <div class="step-num">!</div>
-        <h3>Everything else is still not built</h3>
+        <h3>Starting points, not finished</h3>
         <p>
-          No <code>home-manager</code> base module, no CachyOS-specific
-          data patterns, no worked end-to-end example machine
-          configuration yet. This repository is being extracted from a
-          private configuration one module at a time, not delivered as a
-          finished tool.
+          The <code>ai-workstation</code> profile's package lists are
+          curated starting points, not the only way to use the modules.
+          No end-to-end example machine config, no integration test suite,
+          no drop-in base for a whole workstation yet. This repository is
+          being extracted from private use, one module at a time.
         </p>
       </div>
       <div class="step">
         <div class="step-num">!</div>
-        <h3>Not a drop-in base yet</h3>
+        <h3>Use modules independently today</h3>
         <p>
-          You can import and use the two landed modules on their own
-          today (see Usage in the README). What you cannot do yet is
-          point a whole Arch/CachyOS machine at nixarch and get a
-          complete declarative base &mdash; that's the rest of the
-          roadmap below.
+          You can import any of the five modules on their own right now
+          (see Usage in the README). What you cannot yet do is point a
+          whole Arch/CachyOS machine at nixarch and expect a complete,
+          integrated, out-of-the-box declarative base &mdash; that's the
+          rest of the roadmap.
         </p>
       </div>
     </div>
@@ -91,45 +95,56 @@
 
 <section class="features">
   <div class="container">
-    <h2>What actually works today</h2>
+    <h2>Five working modules</h2>
     <div class="feature-grid">
+      <div class="feature">
+        <h3>packages</h3>
+        <p>
+          The core USP: declarative access to Arch's entire rolling AUR
+          breadth without switching distros. Declare packages once, get
+          them applied reproducibly across machines via Nix without giving
+          up Arch's "nearly everything" package culture. Works with both
+          official repos and the AUR.
+        </p>
+      </div>
       <div class="feature">
         <h3>device-gids</h3>
         <p>
           Pins shared device groups (<code>render</code>,
-          <code>video</code>, and similar) to a caller-supplied gid map,
-          and keeps them there. A oneshot <code>groupmod</code> migrates
-          any pre-existing group to the requested gid &mdash; declaring a
-          gid alone isn't enough, since <code>userborn</code> only creates
-          missing groups at the declared gid and never renumbers an
-          existing one. Including <code>tty</code> in the map also enables
-          the devpts remount lockstep Arch needs to make the live
-          pseudo-terminal gid track the group you chose.
+          <code>video</code>, <code>input</code>, <code>tty</code>, etc.)
+          to stable, caller-chosen gids. Automatically migrates
+          pre-existing groups via <code>groupmod</code> if they land at a
+          different gid. Includes an optional devpts lockstep for keeping
+          <code>/dev/pts</code> in sync when renumbering <code>tty</code>.
         </p>
       </div>
       <div class="feature">
         <h3>gshadow-sync</h3>
         <p>
-          Heals <code>/etc/gshadow</code> after <code>userborn</code>
-          writes <code>/etc/group</code>: on Arch, <code>system-manager</code>
-          realises groups through <code>userborn</code>, which never
-          touches <code>/etc/gshadow</code>, so every group it creates
-          leaves the daily <code>shadow.service</code> hygiene check
-          permanently red. This module runs an idempotent
-          <code>grpconv</code> that only touches the file when the two
-          have actually diverged, and carries over to NixOS unchanged for
-          the same reason.
+          Heals <code>/etc/gshadow</code> inconsistencies that arise when
+          <code>userborn</code> writes <code>/etc/group</code> but not
+          <code>/etc/gshadow</code>. Runs an idempotent <code>grpconv</code>
+          only when the two have actually diverged. Carries over to NixOS
+          unchanged for the same reason.
         </p>
       </div>
       <div class="feature">
-        <h3>system-manager on Arch, for real</h3>
+        <h3>foreign-service</h3>
         <p>
-          <code>system-manager</code> is young, and almost nobody has
-          published a serious, real-world configuration built on it for
-          an Arch-family distro. The two modules above are the start of a
-          worked, opinionated base instead of a toy demo &mdash; more
-          will land the same way, extracted from daily use rather than
-          written speculatively.
+          Declarative configuration over pacman-managed systemd units
+          without owning or overriding them. Treat pacman services as
+          data: configure their behavior, enable/disable, set dependencies,
+          all expressed as Nix options on top of the distro's native
+          package management.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>ai-workstation</h3>
+        <p>
+          A curated starter profile combining the above modules into a
+          coherent base for ML engineers and data scientists: GPU support,
+          development toolchains, scientific Python/R stacks, and CUDA/ROCm
+          layers. The package selections are starting points, not dogma.
         </p>
       </div>
     </div>
@@ -141,33 +156,33 @@
     <h2>Roadmap (planned, not yet built)</h2>
     <div class="install-grid">
       <div class="install-method">
-        <h3>More system-manager modules</h3>
+        <h3>Integration test suite</h3>
         <p>
-          Additional modules beyond <code>device-gids</code> and
-          <code>gshadow-sync</code>, extracted from the same real
-          Arch/CachyOS machine as they prove themselves in daily use.
+          Behavior-driven tests for each module in isolation and in
+          combination, run against fresh Arch/CachyOS installs to verify
+          the modules compose correctly.
         </p>
       </div>
       <div class="install-method">
         <h3>home-manager base module</h3>
         <p>
-          A user-layer module extracted from real daily-driver dotfiles
-          and packages, generalized away from any one machine's specifics.
+          A user-layer module extracted from real daily-driver dotfiles,
+          generalized away from any one machine's specifics. Foundation
+          for reproducible user environments across workstations.
         </p>
       </div>
       <div class="install-method">
-        <h3>CachyOS data patterns</h3>
+        <h3>End-to-end example config</h3>
         <p>
-          A documented, data-driven way to express v3/znver repository
-          selection and kernel/scheduler choice, instead of one-off shell
-          scripts.
+          A worked, runnable machine configuration that imports all five
+          modules and can bootstrap a complete AI-engineer workstation from
+          a fresh Arch install in a single apply.
         </p>
       </div>
     </div>
     <p style="margin-top: var(--space-6); color: var(--text-dim);">
-      None of the above exists in this repository yet. This section will
-      be replaced with real install instructions once there is something
-      to install.
+      Once these land, nixarch will be usable as a true drop-in base layer
+      for new Arch/CachyOS machines.
     </p>
   </div>
 </section>
