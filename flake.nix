@@ -35,6 +35,7 @@
       };
       homeManagerModules = {
         shell = ./home/shell.nix;
+        dev = ./home/dev.nix;
       };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
