@@ -9,41 +9,43 @@ lands faster than nixpkgs) with Nix's declarative system and user layers,
 enabling reproducible workstations without switching to NixOS. Prototype
 AI-engineer machines: access to nearly everything, tidied and reproducible.
 
-The goal is a reusable base layer built on five real, working modules:
+The goal is a reusable base layer built on real, working modules across both
+system and user layers:
 
 - **`packages`** — the core USP. Declarative access to Arch's entire rolling
   AUR breadth. Declare packages once, get them reproducibly across machines
   via Nix without abandoning Arch's "nearly everything" package culture.
-- **`system-manager`** as the system layer — services and system files,
-  declared and applied on top of an otherwise ordinary Arch/CachyOS install.
-- **`home-manager`** as the user layer — dotfiles and user packages, declared
-  the same way you would on NixOS, on a distro that isn't.
-- **`device-gids` and `gshadow-sync`** — real, foundational system-manager
-  modules solving Arch/userborn quirks: stable device group ids and
-  `/etc/gshadow` consistency.
-- **`foreign-service`** — declarative configuration over pacman-managed
-  systemd units, treating distro services as data.
+- **System layer via `system-manager`** — services, system files, and
+  foundational modules (`device-gids`, `gshadow-sync`, `foreign-service`)
+  solving Arch/userborn quirks and declaring pacman services as data.
+- **User layer via `home-manager`** — shell environment (`shell` module:
+  fish, starship, zoxide, fzf) and development tools (`dev` module: git
+  config and direnv/nix-direnv). Lean and config-only; packages come from
+  the system layer.
 - **`ai-workstation` profile** — a curated starter combining the modules for
   ML and data-science workflows: GPU support, dev toolchains, scientific
   stacks, CUDA/ROCm. Starting points, not dogma.
 
 ## Status
 
-**Pre-alpha, five real modules landed.** This repository is being extracted
+**Pre-alpha, system and home-manager layers both real.** This repository is being extracted
 from machines that actually run this way daily — one module at a time — not
 a toy demo or marketing page. As of this writing:
 
-- **Five working modules** have landed:
-  - `packages` (declarative Arch/AUR access — the core USP)
-  - `device-gids` (stable device group ids, with optional devpts lockstep)
-  - `gshadow-sync` (heals `/etc/gshadow` after `userborn` writes `/etc/group`)
-  - `foreign-service` (declarative config over pacman systemd units)
-  - `ai-workstation` profile (starter config for ML/data-science workflows)
+- **Seven working modules** have landed:
+  - **System layer:** `packages` (declarative Arch/AUR access — the core USP),
+    `device-gids` (stable device group ids, with optional devpts lockstep),
+    `gshadow-sync` (heals `/etc/gshadow` after `userborn` writes `/etc/group`),
+    `foreign-service` (declarative config over pacman systemd units), and
+    `ai-workstation` profile (starter config for ML/data-science workflows).
+  - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle) and
+    `dev` (git config and direnv/nix-direnv integration).
 - Each module is real, working code with documented options. Not speculative;
   the patterns run daily in production.
-- The `ai-workstation` profile's package lists are starting points, not gospel.
-- Still **not built**: integration test suite, `home-manager` base module, or
-  end-to-end example machine config.
+- The `ai-workstation` profile's package lists and home-manager modules are
+  starting points, not gospel. Home-manager modules are lean and config-only;
+  packages source from the system layer.
+- Still **not built**: integration test suite or end-to-end example machine config.
 
 What's landed is usable today on its own (see Usage below). What's missing is
 the integration, testing, and documentation needed to make the entire stack
@@ -188,10 +190,53 @@ support, dev toolchains, scientific stacks, CUDA/ROCm.
 }
 ```
 
+### shell (home-manager)
+
+A declarative shell environment bundle: fish, starship prompt, zoxide, and fzf.
+
+```nix
+{
+  imports = [ inputs.nixarch.homeManagerModules.shell ];
+  
+  nixarch.shell.enable = true;
+  
+  # Customize prompt colors and symbols (optional; sensible defaults included)
+  nixarch.shell.starship.preset = "nerd-font-symbols";
+}
+```
+
+### dev (home-manager)
+
+Declarative git configuration and direnv/nix-direnv integration for reproducible
+development environments.
+
+```nix
+{
+  imports = [ inputs.nixarch.homeManagerModules.dev ];
+  
+  nixarch.dev.enable = true;
+  
+  # Git identity (example values; use your own)
+  nixarch.dev.git.identity = {
+    name = "Example User";
+    email = "user@example.com";
+  };
+  
+  # Signing configuration (optional)
+  nixarch.dev.git.signing = {
+    enable = true;
+    format = "openpgp";
+    key = "XXXXXXXXXXXXXXXX";
+  };
+  
+  # direnv/nix-direnv is automatically configured when enabled
+}
+```
+
 ### Full example
 
 See [`examples/system-manager.nix`](examples/system-manager.nix) for a minimal,
-annotated configuration showing both modules in action.
+annotated configuration showing modules in action.
 
 ### NixOS portability
 
@@ -206,12 +251,9 @@ Planned, not yet built:
 
 - **Integration test suite** — behavior-driven tests for each module in
   isolation and in combination, run against fresh Arch/CachyOS installs.
-- **home-manager base module** — a user-layer module extracted from real
-  daily-driver dotfiles and packages, generalized away from any one
-  machine's specifics.
 - **End-to-end example machine config** — a worked, runnable configuration
-  that imports all five modules and can bootstrap a complete workstation
-  from fresh Arch in a single apply.
+  that imports all seven modules (system and home-manager) and can bootstrap
+  a complete workstation from fresh Arch in a single apply.
 - Additional `system-manager` modules extracted from real use as they mature.
 
 Once these land, nixarch will be usable as a true drop-in base layer for new
@@ -221,7 +263,7 @@ Arch/CachyOS machines.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; exports the two landed `system-manager` modules (see Usage) plus still-empty `lib`/`homeManagerModules` placeholders. |
+| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service) and `homeManagerModules` (shell, dev); also profiles (ai-workstation) and lib utilities. |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |
 | `site/` | The project page (`nixarch.corbet.ch`), vendored from the shared `design-corbet-ch` project-pages base. |
