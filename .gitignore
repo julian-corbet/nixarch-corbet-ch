@@ -4,3 +4,6 @@ result-*
 .envrc.local
 *.swp
 .DS_Store
+
+# Cloudflare wrangler local cache (holds account id + name — never commit)
+.wrangler/

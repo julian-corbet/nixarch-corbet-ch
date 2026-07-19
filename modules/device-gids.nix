@@ -51,7 +51,7 @@ in
     deviceGids = lib.mkOption {
       type = lib.types.attrsOf lib.types.int;
       default = { };
-      example = { render = 400; video = 401; };
+      example = { render = 500; video = 501; };
       description = ''
         Map of group name -> gid to pin and, if the group already exists under
         a different gid, migrate to via `groupmod`. Include an entry for
