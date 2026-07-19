@@ -33,7 +33,9 @@
         # as-is — no NixOS-specific fork needed.
         gshadow-sync = ./modules/gshadow-sync.nix;
       };
-      homeManagerModules = { };
+      homeManagerModules = {
+        shell = ./home/shell.nix;
+      };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
     };
