@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <title>nixarch &mdash; Arch/AUR breadth + Nix declarative config for reproducible AI-engineer workstations</title>
-  <meta name="description" content="nixarch merges Arch/AUR's rolling package access with Nix's declarative system and user config, enabling reproducible, software-rich workstations for ML engineers and data scientists. Pre-alpha, real modules landed: device-gids, gshadow-sync, packages, foreign-service, ai-workstation.">
+  <meta name="description" content="nixarch merges Arch/AUR's rolling package access with Nix's declarative system and user config, enabling reproducible, software-rich workstations for ML engineers and data scientists. Pre-alpha, real modules landed: device-gids, gshadow-sync, packages, foreign-service, ai-workstation (system layer) and shell, dev (home-manager layer).">
 
   <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 
   <meta property="og:title" content="nixarch">
-  <meta property="og:description" content="Arch/AUR's rolling package breadth + Nix's declarative config = reproducible, software-rich workstations for ML engineers. Pre-alpha, five real modules landed.">
+  <meta property="og:description" content="Arch/AUR's rolling package breadth + Nix's declarative config = reproducible, software-rich workstations for ML engineers. Pre-alpha, seven real modules landed: both system and home layers.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://nixarch.corbet.ch">
 
@@ -52,18 +52,20 @@
 
 <section id="status" class="how-it-works">
   <div class="container">
-    <h2>Status: pre-alpha, five real modules</h2>
+    <h2>Status: pre-alpha, system and home layers both real</h2>
     <div class="steps">
       <div class="step">
         <div class="step-num">✓</div>
-        <h3>Five real modules have landed</h3>
+        <h3>Seven real modules have landed</h3>
         <p>
-          <code>device-gids</code> (stable device group gids),
+          <strong>System layer:</strong> <code>device-gids</code> (stable device group gids),
           <code>gshadow-sync</code> (heals <code>/etc/gshadow</code>),
           <code>packages</code> (the core USP &mdash; declarative Arch/AUR
           package access), <code>foreign-service</code> (declarative
           configuration over pacman units), and <code>ai-workstation</code>
           (a starter profile tuned for ML and data-science workflows).
+          <strong>Home-manager layer:</strong> <code>shell</code> (fish, starship,
+          zoxide, fzf bundle) and <code>dev</code> (git config and direnv/nix-direnv).
           Each is real, working code with documented options. Not a demo.
         </p>
       </div>
@@ -95,7 +97,7 @@
 
 <section class="features">
   <div class="container">
-    <h2>Five working modules</h2>
+    <h2>Seven working modules</h2>
     <div class="feature-grid">
       <div class="feature">
         <h3>packages</h3>
@@ -141,10 +143,28 @@
       <div class="feature">
         <h3>ai-workstation</h3>
         <p>
-          A curated starter profile combining the above modules into a
+          A curated starter profile combining the system-layer modules into a
           coherent base for ML engineers and data scientists: GPU support,
           development toolchains, scientific Python/R stacks, and CUDA/ROCm
           layers. The package selections are starting points, not dogma.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>shell (home-manager)</h3>
+        <p>
+          A curated user-layer bundle for shell environment: fish, starship
+          prompt, zoxide directory navigation, and fzf for fuzzy search.
+          Declaratively configured and reproducible across machines; packages
+          source from the system's Arch/pacman setup.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>dev (home-manager)</h3>
+        <p>
+          Declarative git configuration (identity, signing, aliases) and
+          direnv/nix-direnv integration for project-scoped Nix shells. Keeps
+          development environments reproducible and machine-portable; lean
+          and config-only, with toolchains supplied via system-layer packages.
         </p>
       </div>
     </div>
