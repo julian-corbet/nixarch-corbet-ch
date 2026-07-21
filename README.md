@@ -271,11 +271,14 @@ Arch/CachyOS machines.
 ## Related projects
 
 nixarch is one of several small, independently-usable open-source projects
-sharing a common design system. Related projects include a NixOS distro build
-(**nixnas**) and a generic RAM/memory-tuning NixOS module (**nixram**) —
-nixarch's own niche is the non-NixOS, Arch-family side of the same "declarative
-machines" idea: access to rolling Arch breadth, tidied by Nix's reproducible
-layers.
+sharing a common design system: a NixOS distro build (**nixnas**), a generic
+RAM/memory-tuning NixOS module (**nixram**), tiny sub-1GB NixOS VPS profiles
+(**nixvps**), cross-machine native Wayland app forwarding
+([nixremote](https://github.com/julian-corbet/nixremote-corbet-ch)), and the
+safe-adoption pattern for declarative fish shell config
+([nixfish](https://github.com/julian-corbet/nixfish-corbet-ch)). nixarch's own
+niche is the non-NixOS, Arch-family side of the same "declarative machines"
+idea: access to rolling Arch breadth, tidied by Nix's reproducible layers.
 
 ## License
 
