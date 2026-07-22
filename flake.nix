@@ -26,6 +26,7 @@
         packages = ./modules/packages.nix;
         foreign-service = ./modules/foreign-service.nix;
         ai-workstation = ./profiles/ai-workstation.nix;
+        niri-desktop = ./profiles/niri-desktop.nix;
       };
       nixosModules = {
         # NixOS realises users with the same userborn as system-manager and
@@ -36,6 +37,7 @@
       homeManagerModules = {
         shell = ./home/shell.nix;
         dev = ./home/dev.nix;
+        niri = ./home/niri.nix;
       };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
