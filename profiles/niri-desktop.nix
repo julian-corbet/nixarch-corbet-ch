@@ -64,6 +64,8 @@ in
     nixarch.packages.pacman = lib.mkDefault (
       [
         "niri"
+        "xwayland-satellite" # X11 app support; niri probes for this binary itself at startup and
+                              # silently disables Xwayland integration (warns, doesn't fail) if absent
         "waybar"
         "mako"
         "fuzzel"
