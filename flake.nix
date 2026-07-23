@@ -3,9 +3,16 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # v5 only -- nixpkgs' own "noctalia-shell"/"noctalia-qs" packages are the old Qt/QML v4
+    # (github:noctalia-dev/noctalia's own team-recommended rewrite, native C++, no Qt at all).
+    # No nixpkgs package exists for v5 yet, hence pulling their own flake directly.
+    noctalia = {
+      url = "github:noctalia-dev/noctalia";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, noctalia }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [
         "x86_64-linux"
@@ -38,6 +45,13 @@
         shell = ./home/shell.nix;
         dev = ./home/dev.nix;
         niri = ./home/niri.nix;
+        # Composed: noctalia-dev/noctalia's own upstream home-manager module (package + settings/
+        # customPalettes/systemd plumbing, unmodified) plus home/noctalia.nix, which supplies
+        # exactly what the upstream module doesn't -- the EGL-vendor-ICD fix a nix-built GPU/EGL
+        # client needs on a non-NixOS host, and startup wiring via niri's own spawn-sh-at-startup.
+        noctalia = { ... }: {
+          imports = [ noctalia.homeModules.default ./home/noctalia.nix ];
+        };
       };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);

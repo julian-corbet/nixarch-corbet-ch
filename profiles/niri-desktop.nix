@@ -56,6 +56,19 @@ in
       default = [ ];
       description = "Escape hatch: extra official-repo packages appended to the computed nixarch.packages.pacman list.";
     };
+
+    shell = lib.mkOption {
+      type = lib.types.enum [ "waybar" "none" ];
+      default = "waybar";
+      description = ''
+        Bar/notification-daemon stack. `"waybar"` installs waybar+mako (the CachyOS-standard
+        pairing this profile has used since the mango-vs-niri decision). `"none"` omits both from
+        the pacman list -- for a host where a home-manager-managed nix shell (e.g. nixarch's own
+        `home/noctalia.nix`) owns the bar/tray/notifications instead; leaving mako's package
+        installed would let it still win the org.freedesktop.Notifications D-Bus race via its own
+        service-activation file, so it has to actually be absent, not just unspawned.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -66,8 +79,6 @@ in
         "niri"
         "xwayland-satellite" # X11 app support; niri probes for this binary itself at startup and
                               # silently disables Xwayland integration (warns, doesn't fail) if absent
-        "waybar"
-        "mako"
         "fuzzel"
         "swayidle"
         "swaylock"
@@ -82,6 +93,7 @@ in
         "nwg-look"
         "adw-gtk-theme"
       ]
+      ++ lib.optionals (cfg.shell == "waybar") [ "waybar" "mako" ]
       ++ lib.optional (cfg.fileManager != null) cfg.fileManager
       ++ lib.optional (cfg.keyring == "gnome-keyring") "gnome-keyring"
       ++ lib.optional (cfg.keyring == "kwallet") "kwalletd6"
