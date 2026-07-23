@@ -63,9 +63,10 @@ in
       type = lib.types.ints.positive;
       default = 9;
       description = ''
-        Number of named, always-present workspaces ("1".."N"). Declared in reverse order
-        internally so workspace "1" renders on top and the middle one centers -- makes
-        Mod+Up/Down feel symmetric regardless of count.
+        Number of named, always-present workspaces ("1".."N"). Declared in ascending order --
+        workspace "1" is niri's own index 1 (top of the vertical stack), counting down to "N"
+        at the bottom, matching left-to-right ascending order in a workspace-indicator bar
+        (waybar's niri/workspaces module lists by niri index, not by name).
       '';
     };
 
@@ -215,7 +216,7 @@ in
           }
       }
 
-      ${lib.concatMapStringsSep "\n" (n: ''workspace "${toString n}"'') (lib.reverseList (lib.range 1 cfg.workspaceCount))}
+      ${lib.concatMapStringsSep "\n" (n: ''workspace "${toString n}"'') (lib.range 1 cfg.workspaceCount)}
 
       ${lib.concatStringsSep "\n" cfg.extraStartup}
 
