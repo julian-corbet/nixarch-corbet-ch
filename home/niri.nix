@@ -138,6 +138,20 @@ in
       default = "";
       description = "Extra raw keybind lines, verbatim, appended inside the `binds {}` block.";
     };
+
+    extraTopLevel = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+      example = ''
+        debug {
+            enable-overlay-planes
+        }
+      '';
+      description = ''
+        Extra raw top-level KDL blocks, verbatim, appended at the end of the file (outside
+        `binds {}`/`window-rule {}` -- for things like a `debug {}` block).
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -310,6 +324,8 @@ in
 
           ${cfg.extraBinds}
       }
+
+      ${cfg.extraTopLevel}
     '';
   };
 }
