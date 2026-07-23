@@ -57,6 +57,18 @@ in
       description = "Escape hatch: extra official-repo packages appended to the computed nixarch.packages.pacman list.";
     };
 
+    polkitAgent = lib.mkOption {
+      type = lib.types.nullOr (lib.types.enum [ "polkit-kde-agent" "mate-polkit" ]);
+      default = "polkit-kde-agent";
+      description = ''
+        Polkit authentication agent, or null for none. `"mate-polkit"` ships an XDG autostart
+        `.desktop` entry pointing at `/usr/lib/mate-polkit/polkit-mate-authentication-agent-1` --
+        niri doesn't process XDG autostart, so it needs an explicit spawn-at-startup line (not
+        provided by this profile) if chosen. `"polkit-kde-agent"` pulls in `qt6ct` alongside it
+        for consistent Qt theming.
+      '';
+    };
+
     shell = lib.mkOption {
       type = lib.types.enum [ "waybar" "none" ];
       default = "waybar";
@@ -88,8 +100,6 @@ in
         "brightnessctl"
         "xdg-desktop-portal-gnome"
         "xdg-desktop-portal-gtk"
-        "polkit-kde-agent"
-        "qt6ct"
         "nwg-look"
         "adw-gtk-theme"
       ]
@@ -98,6 +108,8 @@ in
       ++ lib.optional (cfg.keyring == "gnome-keyring") "gnome-keyring"
       ++ lib.optional (cfg.keyring == "kwallet") "kwalletd6"
       ++ lib.optionals cfg.screenshots [ "grim" "slurp" ]
+      ++ lib.optionals (cfg.polkitAgent == "polkit-kde-agent") [ "polkit-kde-agent" "qt6ct" ]
+      ++ lib.optional (cfg.polkitAgent == "mate-polkit") "mate-polkit"
       ++ cfg.extraPacman
     );
   };

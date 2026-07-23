@@ -23,6 +23,8 @@ let
     '';
 
   presetWidthsSection = lib.concatMapStringsSep "\n        " (p: "proportion ${toString p}") cfg.presetColumnWidths;
+
+  osdClient = "swayosd-client";
 in
 {
   options.nixarch.home.niri = {
@@ -139,6 +141,18 @@ in
       description = "Extra raw keybind lines, verbatim, appended inside the `binds {}` block.";
     };
 
+    osd = lib.mkOption {
+      type = lib.types.nullOr (lib.types.enum [ "swayosd" ]);
+      default = null;
+      description = ''
+        On-screen-display for volume/brightness/mic-mute. `"swayosd"` swaps the volume/
+        brightness/mic-mute binds below from raw wpctl/brightnessctl calls to swayosd-client,
+        which performs the same action AND shows a popup. Requires the `swayosd` package and a
+        running `swayosd-server` (spawn it yourself via extraStartup -- this profile doesn't).
+        Null keeps the original silent wpctl/brightnessctl binds.
+      '';
+    };
+
     extraTopLevel = lib.mkOption {
       type = lib.types.lines;
       default = "";
@@ -239,18 +253,30 @@ in
           Mod+D hotkey-overlay-title="Run an Application" { spawn "${cfg.launcher}"; }
           Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "${cfg.lockCommand}"; }
 
+          ${if cfg.osd == "swayosd" then ''
+          XF86AudioRaiseVolume allow-when-locked=true { spawn "${osdClient}" "--output-volume=raise"; }
+          XF86AudioLowerVolume allow-when-locked=true { spawn "${osdClient}" "--output-volume=lower"; }
+          XF86AudioMute        allow-when-locked=true { spawn "${osdClient}" "--output-volume=mute-toggle"; }
+          XF86AudioMicMute     allow-when-locked=true { spawn "${osdClient}" "--input-volume=mute-toggle"; }
+          '' else ''
           XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
           XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }
           XF86AudioMute        allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
           XF86AudioMicMute     allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"; }
+          ''}
 
           XF86AudioPlay allow-when-locked=true { spawn-sh "playerctl play-pause"; }
           XF86AudioStop allow-when-locked=true { spawn-sh "playerctl stop"; }
           XF86AudioPrev allow-when-locked=true { spawn-sh "playerctl previous"; }
           XF86AudioNext allow-when-locked=true { spawn-sh "playerctl next"; }
 
+          ${if cfg.osd == "swayosd" then ''
+          XF86MonBrightnessUp   allow-when-locked=true { spawn "${osdClient}" "--brightness=raise"; }
+          XF86MonBrightnessDown allow-when-locked=true { spawn "${osdClient}" "--brightness=lower"; }
+          '' else ''
           XF86MonBrightnessUp   allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
           XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
+          ''}
 
           Mod+O repeat=false { toggle-overview; }
           Mod+Q repeat=false { close-window; }
