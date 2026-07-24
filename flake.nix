@@ -45,6 +45,7 @@
         shell = ./home/shell.nix;
         dev = ./home/dev.nix;
         niri = ./home/niri.nix;
+        waybar = ./home/waybar.nix;
         # Composed: noctalia-dev/noctalia's own upstream home-manager module (package + settings/
         # customPalettes/systemd plumbing, unmodified) plus home/noctalia.nix, which supplies
         # exactly what the upstream module doesn't -- the EGL-vendor-ICD fix a nix-built GPU/EGL
