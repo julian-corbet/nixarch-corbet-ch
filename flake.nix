@@ -49,6 +49,7 @@
         mako = ./home/mako.nix;
         swaylock = ./home/swaylock.nix;
         nwgBar = ./home/nwg-bar.nix;
+        eww = ./home/eww.nix;
         # Composed: noctalia-dev/noctalia's own upstream home-manager module (package + settings/
         # customPalettes/systemd plumbing, unmodified) plus home/noctalia.nix, which supplies
         # exactly what the upstream module doesn't -- the EGL-vendor-ICD fix a nix-built GPU/EGL
