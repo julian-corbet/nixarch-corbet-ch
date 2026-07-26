@@ -16,6 +16,30 @@
 # NO personal content — no aliases, no keybindings, no prompt config, no
 # functions. That belongs in a consumer's own home-manager config layered on
 # top.
+#
+# ── FIRST-SWITCH TRAP: read before enabling this on an existing machine ───
+#
+# Setting `programs.fish.enable` for the first time on a box that ALREADY has
+# a plain, non-home-manager-owned ~/.config/fish/config.fish makes
+# `home-manager switch` REFUSE to activate: its collision check
+# (checkLinkTargets) errors out before touching anything. This is the common
+# case on an Arch desktop, where a vendor package (e.g. cachyos-fish-config)
+# has already written that file — precisely the situation this module's own
+# `programs.fish.enable` below walks into.
+#
+# The fix is a ONE-TIME flag on the switch itself, not a config option:
+#   home-manager switch -b hm-bak          # standalone CLI
+#   home-manager.backupFileExtension = "hm-bak";   # via the NixOS module
+# That moves the vendor file aside as config.fish.hm-bak — diffable and
+# reversible. Do NOT reach for per-file `force = true`: home-manager's own
+# docs describe it as a silent one-way delete with no backup.
+#
+# The full treatment of safe fish adoption (plus a typed primitive for
+# universal variables, `set -U` state that home-manager's file management
+# cannot reach) is the subject of a dedicated sibling project, nixfish. This
+# module intentionally does not depend on it — the bundle here stays
+# standalone — but a consumer who wants fish managed properly should prefer
+# nixfish's module over this convenience line.
 { lib, config, ... }:
 let
   cfg = config.nixarch.home.shell;
