@@ -1,18 +1,15 @@
 {
   description = "nixarch — declarative Arch/CachyOS workstations, managed the Nix way (pre-alpha scaffold)";
 
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # v5 only -- nixpkgs' own "noctalia-shell"/"noctalia-qs" packages are the old Qt/QML v4
-    # (github:noctalia-dev/noctalia's own team-recommended rewrite, native C++, no Qt at all).
-    # No nixpkgs package exists for v5 yet, hence pulling their own flake directly.
-    noctalia = {
-      url = "github:noctalia-dev/noctalia";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-  };
+  # ONE INPUT. The desktop modules that used to live here moved to nixdesktop, and the noctalia
+  # flake they needed went with them -- a QML shell has no business in the closure of a project
+  # about Arch package management. nixdesktop is deliberately NOT an input either: the desktop
+  # backend below reads an option that nixdesktop's profile declares, which means a consumer
+  # imports both flakes anyway, and adding it here would only force a fetch on every evaluation
+  # for the many consumers who use nixarch without a desktop at all.
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs, noctalia }:
+  outputs = { self, nixpkgs }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [
         "x86_64-linux"
@@ -33,7 +30,11 @@
         packages = ./modules/packages.nix;
         foreign-service = ./modules/foreign-service.nix;
         ai-workstation = ./profiles/ai-workstation.nix;
-        niri-desktop = ./profiles/niri-desktop.nix;
+
+        # The Arch half of nixdesktop: resolves the roles nixdesktop declares into real pacman
+        # packages. Import alongside nixdesktop.systemManagerModules.niri-desktop, which
+        # declares the `nixdesktop.want` option this reads.
+        desktop-backend = ./modules/desktop-backend.nix;
       };
       nixosModules = {
         # NixOS realises users with the same userborn as system-manager and
@@ -44,19 +45,11 @@
       homeManagerModules = {
         shell = ./home/shell.nix;
         dev = ./home/dev.nix;
-        niri = ./home/niri.nix;
-        waybar = ./home/waybar.nix;
-        mako = ./home/mako.nix;
-        swaylock = ./home/swaylock.nix;
-        nwgBar = ./home/nwg-bar.nix;
-        eww = ./home/eww.nix;
-        # Composed: noctalia-dev/noctalia's own upstream home-manager module (package + settings/
-        # customPalettes/systemd plumbing, unmodified) plus home/noctalia.nix, which supplies
-        # exactly what the upstream module doesn't -- the EGL-vendor-ICD fix a nix-built GPU/EGL
-        # client needs on a non-NixOS host, and startup wiring via niri's own spawn-sh-at-startup.
-        noctalia = { ... }: {
-          imports = [ noctalia.homeModules.default ./home/noctalia.nix ];
-        };
+
+        # User-layer half of the desktop backend: turns a nixdesktop role name into the Arch
+        # command that spawns it, so absolute binary paths stay out of consumers' personal
+        # config. Shares its tables with modules/desktop-backend.nix via lib/desktop-roles.nix.
+        desktop = ./home/desktop.nix;
       };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);

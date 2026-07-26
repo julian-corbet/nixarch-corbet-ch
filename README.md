@@ -25,6 +25,24 @@ system and user layers:
 - **`ai-workstation` profile** — a curated starter combining the modules for
   ML and data-science workflows: GPU support, dev toolchains, scientific
   stacks, CUDA/ROCm. Starting points, not dogma.
+- **`desktop-backend`** — the Arch resolution layer for [nixdesktop][nixdesktop]:
+  turns platform-neutral desktop *roles* into real pacman packages. The only
+  place in the project that knows a desktop package name.
+
+### Scope
+
+nixarch's job is **making an Arch box Nix-manageable** — paving the way for
+system-manager and home-manager to work on a distro neither was built for, and
+declaring the package set they sit on top of. Everything here should be some
+part of that.
+
+That is a boundary as much as a mission. Domains that merely *run on* such a
+box belong in their own modules, not this one — a Wayland desktop
+([nixdesktop][nixdesktop]) is a different domain that happened to start life
+here, and its modules moved out once that was clear. What stays is what a
+consumer needs regardless of what they then run: package convergence, the
+system/user layer plumbing, and the Arch-specific quirks that otherwise cost
+each user the same afternoon.
 
 ## Status
 
@@ -32,14 +50,16 @@ system and user layers:
 from machines that actually run this way daily — one module at a time — not
 a toy demo or marketing page. As of this writing:
 
-- **Seven working modules** have landed:
+- Working modules have landed across both layers:
   - **System layer:** `packages` (declarative Arch/AUR access — the core USP),
     `device-gids` (stable device group ids, with optional devpts lockstep),
     `gshadow-sync` (heals `/etc/gshadow` after `userborn` writes `/etc/group`),
-    `foreign-service` (declarative config over pacman systemd units), and
+    `foreign-service` (declarative config over pacman systemd units),
+    `desktop-backend` (resolves nixdesktop roles into Arch packages), and the
     `ai-workstation` profile (starter config for ML/data-science workflows).
-  - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle) and
-    `dev` (git config and direnv/nix-direnv integration).
+  - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle),
+    `dev` (git config and direnv/nix-direnv integration), and `desktop`
+    (Arch spawn commands for nixdesktop's session components).
 - Each module is real, working code with documented options. Not speculative;
   the patterns run daily in production.
 - The `ai-workstation` profile's package lists and home-manager modules are
@@ -53,10 +73,10 @@ consumable as a single drop-in base for a new machine.
 
 ## Usage
 
-The five modules are plain `system-manager` modules (and `gshadow-sync` is
-also a plain NixOS module — see below). Import them as regular nixpkgs
-modules: add nixarch to your system-manager flake as an input, then reference
-them in your configuration.
+These are plain `system-manager` modules (and `gshadow-sync` is also a plain
+NixOS module — see below). Import them as regular nixpkgs modules: add nixarch
+to your system-manager flake as an input, then reference them in your
+configuration.
 
 ### gshadow-sync
 
@@ -233,6 +253,67 @@ development environments.
 }
 ```
 
+### desktop-backend
+
+The Arch half of [nixdesktop][nixdesktop]. nixdesktop declares *what* a Wayland
+session needs as roles — a file manager, a polkit agent, a bar — and names no
+package and no binary path, so it stays distro-agnostic. This module answers
+*with what*, for Arch: it reads the `nixdesktop.want` attrset that nixdesktop's
+profile publishes, resolves each role through
+[`lib/desktop-roles.nix`](lib/desktop-roles.nix), and feeds the result into
+`nixarch.packages.pacman`. It adds no mechanism of its own.
+
+```nix
+{
+  imports = [
+    inputs.nixdesktop.systemManagerModules.niri-desktop  # declares the roles
+    inputs.nixarch.systemManagerModules.desktop-backend  # resolves them for Arch
+    inputs.nixarch.systemManagerModules.packages         # installs them
+  ];
+
+  nixarch.packages.enable = true;
+  nixarch.desktopBackend.enable = true;
+
+  nixdesktop.niriDesktop.enable = true;  # defaults resolve to a complete session
+}
+```
+
+That alone resolves to a working niri desktop — compositor, bar, notifier,
+launcher, terminal, file manager, polkit agent, keyring, portals, idle/lock,
+clipboard and screenshot tooling.
+
+Role resolution falls through to the role name itself when a role is not in the
+tables, which is why `fileManager`, `launcher` and `terminal` can be free-form:
+on Arch the role name is usually already the package name, so an unlisted choice
+still works without waiting on this table to grow.
+
+The user-layer companion, `homeManagerModules.desktop`, turns the same role
+names into the commands that spawn them, so absolute paths like
+`/usr/lib/mate-polkit/polkit-mate-authentication-agent-1` stay out of personal
+config:
+
+```nix
+{
+  imports = [
+    inputs.nixdesktop.homeModules.niri
+    inputs.nixarch.homeManagerModules.desktop
+  ];
+
+  nixdesktop.niri.enable = true;
+  nixarch.home.desktop = {
+    enable = true;
+    polkitAgent = "mate-polkit";     # must match the system layer
+    keyring = "gnome-keyring";
+  };
+}
+```
+
+Both halves read the same tables from the same file, so the package that gets
+installed and the binary that gets spawned cannot drift apart. The role is
+stated twice because system-manager and home-manager are separate evaluations
+with no shared config tree — an honest cost, and a much smaller one than
+duplicating a path.
+
 ### Full example
 
 See [`examples/system-manager.nix`](examples/system-manager.nix) for a minimal,
@@ -264,7 +345,8 @@ Arch/CachyOS machines.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service) and `homeManagerModules` (shell, dev); also profiles (ai-workstation) and lib utilities. |
+| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service, desktop-backend), `homeManagerModules` (shell, dev, desktop), profiles (ai-workstation), and `nixosModules` (gshadow-sync). |
+| `lib/` | Pure data shared across module classes — notably `desktop-roles.nix`, the Arch resolution tables for nixdesktop roles. |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |
 | `site/` | The project page (`nixarch.corbet.ch`), vendored from the shared `design-corbet-ch` project-pages base. |
@@ -280,6 +362,14 @@ safe-adoption pattern for declarative fish shell config
 ([nixfish](https://github.com/julian-corbet/nixfish-corbet-ch)). nixarch's own
 niche is the non-NixOS, Arch-family side of the same "declarative machines"
 idea: access to rolling Arch breadth, tidied by Nix's reproducible layers.
+
+Closest sibling: **[nixdesktop][nixdesktop]** — a declarative, CPU-rendered
+Wayland desktop (niri, bar, notifier, locker), which grew inside nixarch before
+moving out. The two are designed to pair: nixdesktop declares desktop roles and
+generates config, `desktop-backend` here resolves those roles into Arch
+packages. Either works without the other.
+
+[nixdesktop]: https://github.com/julian-corbet/nixdesktop-corbet-ch
 
 ## License
 

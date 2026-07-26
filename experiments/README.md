@@ -9,3 +9,7 @@ If something in here turns out to matter, distill the actual finding into
 disposable (or delete it).
 
 See the main [README](../README.md) for the project itself.
+
+| File | What |
+|---|---|
+| `desktop-backend-eval.nix` | Confirms nixdesktop roles resolve into Arch package names, and that the system and user halves of the backend agree on which binary a role means. Needs a nixdesktop checkout (defaults to a sibling clone). |
