@@ -109,7 +109,13 @@ in
       suspendAfterSeconds = lib.mkOption {
         type = lib.types.nullOr lib.types.ints.positive;
         default = 600;
-        description = "Seconds of inactivity before suspending. Ignored if lockAfterSeconds is null.";
+        description = ''
+          Seconds of inactivity before suspending. Null drops the suspend action while
+          keeping the idle lock -- the right setting on any machine that must not suspend
+          but should still lock, e.g. a desktop running in a container that shares its
+          kernel (and therefore its power state) with the host. Ignored entirely if
+          lockAfterSeconds is null, which disables the whole swayidle line.
+        '';
       };
     };
 
@@ -226,7 +232,7 @@ in
       ''}
 
       ${lib.optionalString (cfg.idle.lockAfterSeconds != null) ''
-      spawn-sh-at-startup "swayidle -w timeout ${toString cfg.idle.lockAfterSeconds} '${cfg.lockCommand} -f' timeout ${toString cfg.idle.suspendAfterSeconds} 'systemctl suspend' before-sleep '${cfg.lockCommand} -f' lock '${cfg.lockCommand} -f' unlock 'pkill -USR1 ${cfg.lockCommand}'"
+      spawn-sh-at-startup "swayidle -w timeout ${toString cfg.idle.lockAfterSeconds} '${cfg.lockCommand} -f'${lib.optionalString (cfg.idle.suspendAfterSeconds != null) " timeout ${toString cfg.idle.suspendAfterSeconds} 'systemctl suspend'"} before-sleep '${cfg.lockCommand} -f' lock '${cfg.lockCommand} -f' unlock 'pkill -USR1 ${cfg.lockCommand}'"
       ''}
 
       screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
