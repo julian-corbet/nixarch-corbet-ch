@@ -252,8 +252,9 @@ Planned, not yet built:
 - **Integration test suite** — behavior-driven tests for each module in
   isolation and in combination, run against fresh Arch/CachyOS installs.
 - **End-to-end example machine config** — a worked, runnable configuration
-  that imports all nine modules (system and home-manager) and can bootstrap
-  a complete workstation from fresh Arch in a single apply.
+  that imports every module this flake exports (`systemManagerModules` and
+  `homeManagerModules`) and can bootstrap a complete workstation from fresh
+  Arch in a single apply.
 - Additional `system-manager` modules extracted from real use as they mature.
 
 Once these land, nixarch will be usable as a true drop-in base layer for new
