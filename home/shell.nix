@@ -36,10 +36,10 @@
 #
 # The full treatment of safe fish adoption (plus a typed primitive for
 # universal variables, `set -U` state that home-manager's file management
-# cannot reach) is the subject of a dedicated sibling project, nixfish. This
+# cannot reach) is the subject of a dedicated sibling project, nixsh. This
 # module intentionally does not depend on it — the bundle here stays
 # standalone — but a consumer who wants fish managed properly should prefer
-# nixfish's module over this convenience line.
+# nixsh's module over this convenience line.
 { lib, config, ... }:
 let
   cfg = config.nixarch.home.shell;
