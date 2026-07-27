@@ -1,10 +1,10 @@
 # home/desktop.nix — the USER-layer half of the Arch backend for nixdesktop.
 #
 # Closes the seam that would otherwise leak absolute binary paths into every consumer's personal
-# config. nixdesktop's home/niri.nix spawns a polkit agent and a keyring daemon by COMMAND
-# (`polkitAgentCommand`, `keyringCommand`), because those invocations are platform-specific and
-# nixdesktop refuses to know about platforms. Somebody has to supply the string. Before this
-# module that somebody was the consumer, hand-writing
+# config. nixdesktop's home/session.nix starts a polkit agent and a keyring daemon by COMMAND
+# (`session.polkitAgent.command` / `session.keyring.command`), because those invocations are
+# platform-specific and nixdesktop refuses to know about platforms. Somebody has to supply the
+# string. Before this module that somebody was the consumer, hand-writing
 # "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1" into a values file.
 #
 # So: state the same role you gave the system layer, get the right command for Arch. The tables
@@ -25,15 +25,15 @@ in
 {
   options.nixarch.home.desktop = {
     enable = lib.mkEnableOption
-      "Arch-specific spawn commands for nixdesktop's session components (requires nixdesktop's home/niri.nix in the same home-manager evaluation)";
+      "Arch-specific spawn commands for nixdesktop's session components (requires nixdesktop's home/session.nix in the same home-manager evaluation)";
 
     polkitAgent = lib.mkOption {
       type = lib.types.nullOr (lib.types.enum (lib.attrNames roles.polkitAgents));
       default = null;
       description = ''
         Polkit agent role — must match what the system layer installs
-        (`nixdesktop.niriDesktop.polkitAgent`). Sets nixdesktop's `polkitAgentCommand` to this
-        agent's Arch binary path.
+        (`nixdesktop.niriDesktop.polkitAgent`). Sets nixdesktop's
+        `session.polkitAgent.command` to this agent's Arch binary path.
 
         Null means no agent is spawned, which under niri means privileged GUI prompts never
         appear at all — silently, with nothing logged, since niri does not process XDG autostart.
@@ -45,18 +45,35 @@ in
       default = null;
       description = ''
         Secret-service role — must match `nixdesktop.niriDesktop.keyring`. Sets nixdesktop's
-        `keyringCommand`. Set exactly one provider: two daemons racing for
+        `session.keyring.command`. Set exactly one provider: two daemons racing for
         `org.freedesktop.secrets` presents as applications intermittently losing stored secrets.
       '';
     };
   };
 
   config = lib.mkIf cfg.enable {
-    nixdesktop.niri = {
-      polkitAgentCommand = lib.mkIf (cfg.polkitAgent != null)
-        roles.polkitAgents.${cfg.polkitAgent}.command;
-      keyringCommand = lib.mkIf (cfg.keyring != null)
-        roles.keyrings.${cfg.keyring}.command;
+    # Targets nixdesktop's `session` module, not its `niri` module. These two
+    # components used to be spawned by niri itself via `spawn-at-startup` lines in
+    # config.kdl, and this backend filled in `nixdesktop.niri.polkitAgentCommand`
+    # / `keyringCommand` accordingly. That mechanism could not work: a
+    # spawn-at-startup line runs once at session start and cannot fire into an
+    # already-running session, so switching configuration silently failed to start
+    # anything until the next login. nixdesktop moved both components to systemd
+    # user services, and the command strings go there now.
+    #
+    # `enable` is set here as well as `command`. The session module ships every
+    # component off by default, so naming a command without enabling it would
+    # produce a role that resolves correctly and then never runs — the exact
+    # silent-nothing failure this whole change exists to remove.
+    nixdesktop.session = {
+      polkitAgent = lib.mkIf (cfg.polkitAgent != null) {
+        enable = true;
+        command = roles.polkitAgents.${cfg.polkitAgent}.command;
+      };
+      keyring = lib.mkIf (cfg.keyring != null) {
+        enable = true;
+        command = roles.keyrings.${cfg.keyring}.command;
+      };
     };
   };
 }
