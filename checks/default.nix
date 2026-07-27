@@ -75,6 +75,11 @@ let
   ];
   pkgsDisabled = evalPackages { };
   pkgsPruneOn = evalPackages { nixarch.packages = { enable = true; pruneUndeclared = true; }; };
+  # A consumer who sets `keep` at all: the default is gone, so only the module's own
+  # non-overridable union can still protect the package manager here.
+  pkgsKeepOverridden = evalPackages {
+    nixarch.packages = { enable = true; pruneUndeclared = true; keep = [ "cachyos-keyring" ]; };
+  };
 
   packagesChecks = [
     (check "packages/pacman-declared-round-trips"
@@ -107,20 +112,22 @@ let
       (pkgsPruneOn.nixarch.packages.pruneUndeclared == true)
       "got: ${builtins.toJSON pkgsPruneOn.nixarch.packages.pruneUndeclared}")
 
-    # Assert the PROPERTY, not a snapshot of the list. What matters is that prune can never
-    # delete the tool it runs: `pacman`, `archlinux-keyring` and `pacman-mirrorlist` are members
-    # of neither `base` nor `base-devel` (verified on a real box), so if they are absent from this
-    # floor, `pruneUndeclared` on a host that forgot to declare them removes the package manager
-    # from a machine that then cannot reinstall it. Pinning the exact list instead would make this
-    # check fail on any legitimate addition while catching none of that.
-    (check "packages/keep-floor-protects-the-package-manager"
-      (builtins.all (p: builtins.elem p pkgsDefault.nixarch.packages.keep)
-        [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ])
+    # The floor a consumer never touches.
+    (check "packages/keep-default-floor"
+      (pkgsDefault.nixarch.packages.keep == [ "base" "base-devel" ])
       "got: ${builtins.toJSON pkgsDefault.nixarch.packages.keep}")
 
-    (check "packages/keep-floor-retains-base-groups"
-      (builtins.all (p: builtins.elem p pkgsDefault.nixarch.packages.keep) [ "base" "base-devel" ])
-      "got: ${builtins.toJSON pkgsDefault.nixarch.packages.keep}")
+    # THE ONE THAT MATTERS. `keep` is a plain listOf, so a consumer who SETS it replaces the
+    # default outright -- meaning any protection expressed only as a default evaporates the
+    # moment someone customises, which is exactly when they are most likely to have forgotten
+    # something. The package manager is therefore union'd in by the module itself and must
+    # survive an override that mentions none of it. Asserted against `effectiveKeep`, the
+    # read-only option that IS what the reconciler interpolates -- reading the rendered script
+    # instead would force a build and break the eval-only property of this suite.
+    (check "packages/prune-cannot-delete-the-package-manager"
+      (builtins.all (p: lib.elem p pkgsKeepOverridden.nixarch.packages.effectiveKeep)
+        [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ])
+      "consumer set keep = [ cachyos-keyring ]; effectiveKeep = ${builtins.toJSON pkgsKeepOverridden.nixarch.packages.effectiveKeep}")
 
     (check "packages/unit-exists-when-enabled"
       (pkgsDeclared.systemd.services ? "nixarch-packages-reconcile")

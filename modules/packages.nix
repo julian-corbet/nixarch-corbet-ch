@@ -57,12 +57,25 @@ let
   cfg = config.nixarch.packages;
   hostPaths = import ../lib/host-path.nix { inherit lib; };
 
+  # NON-OVERRIDABLE. Union'd into the prune keep-set regardless of what a consumer puts in
+  # `keep`, because `keep` is a plain listOf: a consumer who SETS it replaces the default
+  # outright rather than adding to it. That is the wrong failure mode for this particular
+  # content -- the hazard being guarded against is someone forgetting, and "you lose the
+  # protection at the exact moment you start customising" is the shape of guard that fails
+  # precisely when it is needed. Verified: a config setting `keep = [ "cachyos-keyring" ]`
+  # evaluates to exactly that one entry, with the default gone.
+  #
+  # These three are members of NEITHER `base` nor `base-devel` (checked on a real box), so
+  # nothing else in the floor covers them. Pruning them means `pacman -Rns pacman`: the
+  # reconciler deleting the tool it runs, on a machine that then cannot reinstall it.
+  criticalKeep = [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ];
+
   reconcile = pkgs.writeShellScript "nixarch-packages-reconcile" ''
     set -eu
 
     pacman_pkgs=(${lib.escapeShellArgs cfg.pacman})
     aur_pkgs=(${lib.escapeShellArgs cfg.aur})
-    keep_list=(${lib.escapeShellArgs cfg.keep})
+    keep_list=(${lib.escapeShellArgs (lib.unique (criticalKeep ++ cfg.keep))})
 
     # --- 1. official-repo packages -----------------------------------------
     if [ ''${#pacman_pkgs[@]} -gt 0 ]; then
@@ -177,20 +190,22 @@ in
 
     keep = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "base" "base-devel" "pacman" "archlinux-keyring" "pacman-mirrorlist" ];
+      default = [ "base" "base-devel" ];
       description = ''
         Package groups or exact names that are NEVER removed even when
         `pruneUndeclared` is on — the safety floor. Entries are expanded as
         pacman groups first (`pacman -Sqg`); anything that isn't a known
         group is kept as a literal package name.
 
-        THE PACKAGE MANAGER IS IN THE FLOOR ON PURPOSE. `pacman`,
-        `archlinux-keyring` and `pacman-mirrorlist` are NOT members of `base`
-        or `base-devel` — verified on a real Arch box, all three report as
-        outside both groups. Without them listed, `pruneUndeclared` would
-        `pacman -Rns pacman` on any host that had not thought to declare it:
-        the reconciler deleting the tool it runs, on a machine that then has
-        no way to put it back.
+        SETTING THIS REPLACES THE DEFAULT, it does not add to it — a plain
+        `listOf` works that way. So treat this as "the whole floor I want",
+        not "extras on top".
+
+        The one exception is deliberate: `pacman`, `archlinux-keyring` and
+        `pacman-mirrorlist` are union'd in unconditionally and cannot be
+        removed from here, because a guard you lose the moment you start
+        customising is a guard that fails exactly when it is needed. See
+        `criticalKeep` at the top of this file.
 
         DERIVATIVE DISTROS MUST ADD THEIR OWN. An Arch derivative replaces
         exactly these three with its own equivalents — on CachyOS that is
@@ -206,7 +221,22 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  # Computed, read-only: what prune will ACTUALLY refuse to remove. Exposed because `keep` alone
+  # does not tell you -- the package-manager set is union'd in by this module and survives any
+  # override. A consumer debugging "why was X removed / kept" should read this, not `keep`.
+  #
+  # No `default`, and defined unconditionally below: `readOnly` permits exactly one definition,
+  # and a default plus a `mkIf`-guarded definition counts as two.
+  options.nixarch.packages.effectiveKeep = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    readOnly = true;
+    description = "The keep-set prune actually applies: `keep` plus the non-removable package-manager floor.";
+  };
+
+  config = lib.mkMerge [
+    { nixarch.packages.effectiveKeep = lib.unique (criticalKeep ++ cfg.keep); }
+
+    (lib.mkIf cfg.enable {
     systemd.services.nixarch-packages-reconcile = {
       description = "nixarch: converge the installed Arch/AUR package set to the declared list";
       # multi-user.target (not sysinit) so system-manager (re)runs this on a live
@@ -224,5 +254,6 @@ in
         ExecStart = "${reconcile}";
       };
     };
-  };
+    })
+  ];
 }
