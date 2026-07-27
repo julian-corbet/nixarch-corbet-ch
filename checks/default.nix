@@ -80,6 +80,24 @@ let
   pkgsKeepOverridden = evalPackages {
     nixarch.packages = { enable = true; pruneUndeclared = true; keep = [ "cachyos-keyring" ]; };
   };
+  # A derivative host that ALSO overrides `keep` for its own unrelated reasons: the distro floor
+  # must survive that, on the same terms as the Arch one.
+  pkgsCachyos = evalPackages {
+    nixarch.packages = {
+      enable = true;
+      pruneUndeclared = true;
+      distro = "cachyos";
+      keep = [ "something-unrelated" ];
+    };
+  };
+  pkgsExtraCritical = evalPackages {
+    nixarch.packages = {
+      enable = true;
+      distro = "arch";
+      extraCriticalKeep = [ "endeavouros-keyring" ];
+      keep = [ "something-unrelated" ];
+    };
+  };
 
   packagesChecks = [
     (check "packages/pacman-declared-round-trips"
@@ -128,6 +146,38 @@ let
       (builtins.all (p: lib.elem p pkgsKeepOverridden.nixarch.packages.effectiveKeep)
         [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ])
       "consumer set keep = [ cachyos-keyring ]; effectiveKeep = ${builtins.toJSON pkgsKeepOverridden.nixarch.packages.effectiveKeep}")
+
+    # THE SAME PROPERTY ONE DISTRO LAYER DOWN. A derivative serves its own repos from its own
+    # mirrorlists signed by its own keyring; those packages are the precondition for fetching
+    # anything, so pruning them leaves a machine that cannot reinstall them. Before `distro`
+    # existed this was the consumer's job via `keep` -- which is the one place it could not
+    # safely live, because setting `keep` for any unrelated reason silently dropped it. Asserted
+    # against a config that does exactly that.
+    (check "packages/prune-cannot-delete-a-derivative-package-manager"
+      (builtins.all (p: lib.elem p pkgsCachyos.nixarch.packages.effectiveKeep)
+        [ "cachyos-keyring" "cachyos-mirrorlist" "cachyos-v3-mirrorlist" "cachyos-v4-mirrorlist" "cachyos-hooks" ])
+      "distro = cachyos with keep = [ something-unrelated ]; effectiveKeep = ${builtins.toJSON pkgsCachyos.nixarch.packages.effectiveKeep}")
+
+    # ADDITIVE, not a replacement: on CachyOS `[core]`/`[extra]`/`[multilib]` still resolve
+    # through Arch's own /etc/pacman.d/mirrorlist, so both keyrings and both mirrorlists are
+    # load-bearing. Verified against a live box; this pins it.
+    (check "packages/derivative-floor-adds-to-the-arch-floor"
+      (builtins.all (p: lib.elem p pkgsCachyos.nixarch.packages.effectiveKeep)
+        [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ])
+      "distro = cachyos; effectiveKeep = ${builtins.toJSON pkgsCachyos.nixarch.packages.effectiveKeep}")
+
+    # A plain Arch host must NOT acquire another distro's packages -- the floor is selected, not
+    # accumulated. Without this, adding a distro to the table could silently widen every host.
+    (check "packages/arch-default-carries-no-derivative-floor"
+      (!lib.elem "cachyos-keyring" pkgsPruneOn.nixarch.packages.effectiveKeep)
+      "distro defaults to arch; effectiveKeep = ${builtins.toJSON pkgsPruneOn.nixarch.packages.effectiveKeep}")
+
+    # The escape hatch for a derivative the table does not model yet, on the same
+    # survives-an-override terms as the built-ins.
+    (check "packages/extra-critical-keep-survives-a-keep-override"
+      (lib.elem "endeavouros-keyring" pkgsExtraCritical.nixarch.packages.effectiveKeep
+        && lib.elem "pacman" pkgsExtraCritical.nixarch.packages.effectiveKeep)
+      "effectiveKeep = ${builtins.toJSON pkgsExtraCritical.nixarch.packages.effectiveKeep}")
 
     (check "packages/unit-exists-when-enabled"
       (pkgsDeclared.systemd.services ? "nixarch-packages-reconcile")

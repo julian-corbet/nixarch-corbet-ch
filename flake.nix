@@ -60,6 +60,23 @@
         desktop = ./home/desktop.nix;
       };
 
+      # The eval-time regression net in ./checks. It was written, committed and NOT reachable
+      # from any flake output, so `nix flake check` walked the module classes and the formatter
+      # and reported success without evaluating a single one of its assertions. A suite nothing
+      # runs is worse than no suite: it reads as coverage while providing none, and it silently
+      # stopped being true the moment a module changed under it.
+      #
+      # `nixpkgs` is passed explicitly rather than left to its `<nixpkgs>` default, which would
+      # resolve through NIX_PATH — an impurity that makes the result depend on the invoking
+      # machine's channels rather than this flake's lock.
+      checks = forAllSystems (system:
+        (import ./checks { nixpkgs = nixpkgs.outPath; }) // {
+          formatting = nixpkgs.legacyPackages.${system}.runCommand "nixarch-fmt-check" { } ''
+            ${nixpkgs.legacyPackages.${system}.nixpkgs-fmt}/bin/nixpkgs-fmt --check ${./.} \
+              > /dev/null && touch $out
+          '';
+        });
+
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
     };
 }

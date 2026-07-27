@@ -17,7 +17,11 @@ let
   cfg = config.nixarch.desktopBackend;
   roles = import ../lib/desktop-roles.nix { inherit lib; };
   want = config.nixdesktop.want or { };
-  resolved = roles.packagesFor want;
+  # Split before publishing: `pacman -S` fails the whole transaction on one unknown target, so an
+  # AUR-only component left in the repo list takes the entire desktop down with it. extraPacman
+  # goes through the same split -- AUR membership is a fact about the package name, and a host
+  # that names an AUR package there deserves a working desktop, not a cryptic `target not found`.
+  split = roles.partitionAur (roles.packagesFor want ++ cfg.extraPacman);
 in
 {
   options.nixarch.desktopBackend = {
@@ -36,6 +40,10 @@ in
         role — a Bluetooth applet, a GTK theme, an audio mixer. Prefer nixdesktop's own
         `extraComponents` when the thing is genuinely part of the desktop policy; use this when
         it is specific to one machine.
+
+        Names known to be AUR-only are routed to `nixarch.packages.aur` rather than failing the
+        pacman transaction, so the option name is about intent, not about which repo it must
+        come from.
       '';
     };
   };
@@ -52,6 +60,7 @@ in
     # assertions module -- so a module that defines them fails to evaluate anywhere that does not
     # supply them. Resolving roles into a list a consumer inspects without installing anything is
     # a legitimate use anyway; leave `packages.enable` to them.
-    nixarch.packages.pacman = resolved ++ cfg.extraPacman;
+    nixarch.packages.pacman = split.repo;
+    nixarch.packages.aur = split.aur;
   };
 }

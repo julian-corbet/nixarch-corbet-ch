@@ -68,7 +68,41 @@ let
   # These three are members of NEITHER `base` nor `base-devel` (checked on a real box), so
   # nothing else in the floor covers them. Pruning them means `pacman -Rns pacman`: the
   # reconciler deleting the tool it runs, on a machine that then cannot reinstall it.
-  criticalKeep = [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ];
+  archCriticalKeep = [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ];
+
+  # The same guarantee, one distro layer down. A derivative serves its own repos from its own
+  # mirrorlists, signed by its own keyring, so the set above does not cover it — and because
+  # these packages are the PRECONDITION for fetching anything, a prune that removes them leaves
+  # a machine that cannot reinstall them. That is the one failure this module must never cause.
+  #
+  # ADDITIVE, not a replacement. Verified by reading /etc/pacman.conf on a live CachyOS box:
+  # `[core]`, `[extra]` and `[multilib]` all `Include = /etc/pacman.d/mirrorlist` — Arch's own,
+  # shipped by `pacman-mirrorlist` — while only the `[cachyos*]` repos use the CachyOS lists. A
+  # derivative therefore needs BOTH keyrings and BOTH mirrorlists, and an earlier version of
+  # this file's own documentation was wrong to say a derivative "replaces exactly these three".
+  #
+  # Deliberately narrow: only what pacman needs to FETCH AND VERIFY. `cachyos-settings`
+  # (sysctls, udev rules, a zram-generator config) and `cachyos-rate-mirrors` (ranks mirrors)
+  # are not preconditions — removing them changes how the system behaves, not whether the
+  # package manager works, and the header above already explains why declaring that class of
+  # package is documentation rather than a package list.
+  distroCriticalKeep = {
+    arch = [ ];
+    cachyos = [
+      "cachyos-keyring"
+      "cachyos-mirrorlist"
+      # The microarchitecture repos ([cachyos-v3], [cachyos-core-v3], ...) carry their own
+      # mirrorlists, and a v3/v4 box resolves most of its packages through them.
+      "cachyos-v3-mirrorlist"
+      "cachyos-v4-mirrorlist"
+      "cachyos-hooks"
+    ];
+  };
+
+  criticalKeep =
+    archCriticalKeep
+    ++ distroCriticalKeep.${cfg.distro}
+    ++ cfg.extraCriticalKeep;
 
   reconcile = pkgs.writeShellScript "nixarch-packages-reconcile" ''
     set -eu
@@ -188,6 +222,46 @@ in
       '';
     };
 
+    distro = lib.mkOption {
+      type = lib.types.enum (lib.attrNames distroCriticalKeep);
+      default = "arch";
+      example = "cachyos";
+      description = ''
+        Which Arch-family distribution this host runs. Selects the package-manager
+        floor that prune can never remove, on top of the Arch one.
+
+        Declared, never detected. This module is evaluated wherever the flake is
+        built, which is not necessarily the machine it targets, so probing
+        `/etc/os-release` would read the wrong host's identity — and the failure
+        would be silent: a wrong answer here removes protection rather than
+        raising an error.
+
+        An `enum` rather than a free string on purpose. A typo in a free-form
+        value would resolve to "no extra floor" and prune the keyring, which is
+        precisely the outcome this option exists to prevent; a typo in an enum
+        fails evaluation. For a derivative not listed here, leave this at `arch`
+        and use `extraCriticalKeep` — then send a patch adding it.
+      '';
+    };
+
+    extraCriticalKeep = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "endeavouros-keyring" "endeavouros-mirrorlist" ];
+      description = ''
+        Additional names union'd into the non-overridable floor, for an
+        Arch derivative `distro` does not model yet.
+
+        Separate from `keep` because it inherits `keep`'s one weakness in
+        reverse: `keep` is a plain `listOf`, so setting it REPLACES the default,
+        and anything expressed there is lost the moment a consumer customises.
+        Entries here survive that, exactly as the built-in floor does.
+
+        Use it only for package-manager preconditions — a keyring, a mirrorlist,
+        a pacman hook. Ordinary "do not remove this" belongs in `keep`.
+      '';
+    };
+
     keep = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ "base" "base-devel" ];
@@ -201,22 +275,25 @@ in
         `listOf` works that way. So treat this as "the whole floor I want",
         not "extras on top".
 
-        The one exception is deliberate: `pacman`, `archlinux-keyring` and
-        `pacman-mirrorlist` are union'd in unconditionally and cannot be
-        removed from here, because a guard you lose the moment you start
-        customising is a guard that fails exactly when it is needed. See
-        `criticalKeep` at the top of this file.
+        The one exception is deliberate: the package-manager floor is union'd in
+        unconditionally and cannot be removed from here, because a guard you lose
+        the moment you start customising is a guard that fails exactly when it is
+        needed. See `criticalKeep` at the top of this file, and read
+        `effectiveKeep` to see what prune will actually apply.
 
-        DERIVATIVE DISTROS MUST ADD THEIR OWN. An Arch derivative replaces
-        exactly these three with its own equivalents — on CachyOS that is
-        `cachyos-keyring`, `cachyos-mirrorlist` (plus the v3/v4 variants for
-        the microarchitecture repos) and `cachyos-hooks`. None of them are in
-        `base`/`base-devel` either, and this module cannot guess which
-        derivative it is running on, so a consumer on one MUST extend this
-        list. See the bootstrap note at the top of this file: those packages
-        are a PRECONDITION of this module, not something it can install —
-        the reconciler needs a working keyring and mirrorlist before it can
-        fetch anything at all.
+        DERIVATIVE DISTROS ARE HANDLED BY `distro`, NOT HERE. Set
+        `distro = "cachyos"` and the derivative's keyring, mirrorlists and pacman
+        hooks join the floor on the same non-overridable terms. This used to be
+        the consumer's job via this option, which was the wrong place for it: a
+        floor expressed in a plain `listOf` disappears the moment a host sets that
+        list for some unrelated reason, and the packages in question are the
+        PRECONDITION for fetching anything — lose them and the machine cannot
+        reinstall them.
+
+        Note that a derivative ADDS to the Arch floor rather than replacing it.
+        On CachyOS, `[core]`, `[extra]` and `[multilib]` still resolve through
+        Arch's own `/etc/pacman.d/mirrorlist`; only the `[cachyos*]` repos use the
+        CachyOS lists. Both keyrings and both mirrorlists are load-bearing.
       '';
     };
   };

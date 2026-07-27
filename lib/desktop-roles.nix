@@ -93,6 +93,28 @@ rec {
   # silently do nothing.
   compositors.niri = [ "niri" "brightnessctl" "playerctl" ];
 
+  # ── Which of the names above are AUR-only ───────────────────────────────────────────────────
+
+  # `pacman -S` aborts the ENTIRE transaction on one unknown target, so a single AUR name mixed
+  # into the repo list fails every other package in it too. Splitting the two lists is therefore
+  # not a nicety — it is what stops one AUR component from blocking the whole desktop.
+  #
+  # A flat set of names, not a field on every table entry: whether a package is in the repos or
+  # the AUR is a property of the PACKAGE, not of the role it happens to fill, and the tables above
+  # are read by home/desktop.nix too — changing their shape to carry a flag would churn a consumer
+  # that has no interest in the distinction. It also covers free-form values (`extraComponents`,
+  # `launcher`, `terminal`) that never appear in a table at all.
+  aurOnly = [
+    # In the AUR only; the repos carry no eww.
+    "eww"
+  ];
+
+  # Partition a resolved package list into what `pacman -S` can take and what needs an AUR helper.
+  partitionAur = packages: {
+    repo = lib.filter (p: !(lib.elem p aurOnly)) packages;
+    aur = lib.filter (p: lib.elem p aurOnly) packages;
+  };
+
   # ── Resolution ──────────────────────────────────────────────────────────────────────────────
 
   # Look a role value up in a table; fall through to the value itself as a package name. The
