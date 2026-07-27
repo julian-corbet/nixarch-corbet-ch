@@ -55,6 +55,7 @@ a toy demo or marketing page. As of this writing:
     `device-gids` (stable device group ids, with optional devpts lockstep),
     `gshadow-sync` (heals `/etc/gshadow` after `userborn` writes `/etc/group`),
     `foreign-service` (declarative config over pacman systemd units),
+    `gcroot-guard` (catches the activated-but-unregistered generation),
     `desktop-backend` (resolves nixdesktop roles into Arch packages), and the
     `ai-workstation` profile (starter config for ML/data-science workflows).
   - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle),
@@ -163,6 +164,50 @@ reproducibly across machines via Nix without switching distros.
   ];
 }
 ```
+
+### gcroot-guard
+
+Catches a silent, data-loss-class failure in `system-manager switch` on a
+Determinate-installer box.
+
+Applying a config is two steps, and only the first is loud. `activate` writes
+the units and starts things — the machine is now *running* that generation.
+`register` then adds it to the system-manager profile, which is what makes it a
+garbage-collection **root**. But `register` shells out to `nix-env`, and
+`nix-env` is on the invoking user's PATH, not root's under plain `sudo`. So
+step 2 dies after step 1 has already succeeded.
+
+Nothing looks wrong. The box comes up, everything works — and the store paths
+the running system depends on have no GC root, so the next
+`nix-collect-garbage` is entitled to delete the currently-running system out
+from under itself.
+
+```nix
+{
+  imports = [ inputs.nixarch.systemManagerModules.gcroot-guard ];
+
+  nixarch.gcrootGuard.enable = true;
+}
+```
+
+This adds a boot-and-switch oneshot that fails loudly when the running
+generation is unrooted, and installs `nixarch-register` — the same registration
+with the PATH that `sudo` does not provide, so the fix is one command rather
+than a remembered incantation.
+
+The check works by asking about **itself**: the script is a store path inside
+the generation being checked, so `nix-store --query --roots "$0"` reports that
+generation's profile link if it was registered, and nothing at all if it was
+not. That self-reference is what lets it work without the module knowing its
+own output hash, which would be circular.
+
+It cannot be an assertion: whether registration succeeded is a fact about the
+machine *after* activation, not about the configuration. A correct config fails
+this way exactly as readily as a wrong one.
+
+Set `failLoudly = false` to log without marking the unit failed — though the
+default is `true` deliberately, since the entire character of this bug is that
+it is silent and everything appears fine.
 
 ### foreign-service
 
@@ -346,7 +391,7 @@ Arch/CachyOS machines.
 | Path | Purpose |
 |---|---|
 | `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service, desktop-backend), `homeManagerModules` (shell, dev, desktop), profiles (ai-workstation), and `nixosModules` (gshadow-sync). |
-| `lib/` | Pure data shared across module classes — notably `desktop-roles.nix`, the Arch resolution tables for nixdesktop roles. |
+| `lib/` | Pure data shared across module classes — `desktop-roles.nix` (Arch resolution tables for nixdesktop roles) and `host-path.nix` (the host PATH every unit driving pacman/nix needs). |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |
 | `site/` | The project page (`nixarch.corbet.ch`), vendored from the shared `design-corbet-ch` project-pages base. |

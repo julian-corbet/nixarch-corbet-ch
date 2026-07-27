@@ -33,6 +33,7 @@
 { lib, pkgs, config, ... }:
 let
   cfg = config.nixarch.packages;
+  hostPaths = import ../lib/host-path.nix { inherit lib; };
 
   reconcile = pkgs.writeShellScript "nixarch-packages-reconcile" ''
     set -eu
@@ -173,9 +174,9 @@ in
       wantedBy = [ "multi-user.target" ];
       # system-manager injects a nix-store-only PATH (no /usr/bin) into every unit
       # it declares, so `pacman`/`runuser` (and the coreutils the prune step uses)
-      # would not resolve on a real box. Force the normal host PATH — same fix the
-      # foreign-service module documents. These are all host tools by nature.
-      environment.PATH = lib.mkForce "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
+      # would not resolve on a real box. Force the normal host PATH; see
+      # lib/host-path.nix for why mkForce is the only thing that wins here.
+      environment.PATH = lib.mkForce hostPaths.hostPath;
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;

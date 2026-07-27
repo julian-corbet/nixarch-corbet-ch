@@ -29,6 +29,12 @@
         device-gids = ./modules/device-gids.nix;
         packages = ./modules/packages.nix;
         foreign-service = ./modules/foreign-service.nix;
+
+        # Detects the activated-but-never-registered generation -- the failure where `activate`
+        # succeeds, `register` dies on a missing nix-env, and the running system quietly has no
+        # GC root. Ships `nixarch-register` to fix it.
+        gcroot-guard = ./modules/gcroot-guard.nix;
+
         ai-workstation = ./profiles/ai-workstation.nix;
 
         # The Arch half of nixdesktop: resolves the roles nixdesktop declares into real pacman

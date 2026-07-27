@@ -76,6 +76,7 @@
 { lib, pkgs, config, ... }:
 let
   cfg = config.nixarch.foreignServices;
+  hostPaths = import ../lib/host-path.nix { inherit lib; };
 
   # A configFiles value is either a literal string (installed as `text`) or
   # a Nix path / store path (installed as `source`) — same two shapes
@@ -214,7 +215,7 @@ in
         # commands (and anything they shell out to internally) resolve against
         # a nix-store-only PATH with no `/usr/bin`, and can silently do nothing
         # while still reporting success.
-        environment.PATH = lib.mkForce "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
+        environment.PATH = lib.mkForce hostPaths.hostPath;
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
