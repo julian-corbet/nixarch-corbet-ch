@@ -47,6 +47,9 @@
         # has the same /etc/gshadow blind spot, so this module carries over
         # as-is — no NixOS-specific fork needed.
         gshadow-sync = ./modules/gshadow-sync.nix;
+
+        # Only entry in this class, so it is trivially the default.
+        default = self.nixosModules.gshadow-sync;
       };
       homeManagerModules = {
         shell = ./home/shell.nix;
