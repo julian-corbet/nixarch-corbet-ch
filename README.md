@@ -22,9 +22,6 @@ system and user layers:
   fish, starship, zoxide, fzf) and development tools (`dev` module: git
   config and direnv/nix-direnv). Lean and config-only; packages come from
   the system layer.
-- **`ai-workstation` profile** — a curated starter combining the modules for
-  ML and data-science workflows: GPU support, dev toolchains, scientific
-  stacks, CUDA/ROCm. Starting points, not dogma.
 - **`desktop-backend`** — the Arch resolution layer for [nixdesktop][nixdesktop]:
   turns platform-neutral desktop *roles* into real pacman packages. The only
   place in the project that knows a desktop package name.
@@ -56,16 +53,14 @@ a toy demo or marketing page. As of this writing:
     `gshadow-sync` (heals `/etc/gshadow` after `userborn` writes `/etc/group`),
     `foreign-service` (declarative config over pacman systemd units),
     `gcroot-guard` (catches the activated-but-unregistered generation),
-    `desktop-backend` (resolves nixdesktop roles into Arch packages), and the
-    `ai-workstation` profile (starter config for ML/data-science workflows).
+    and `desktop-backend` (resolves nixdesktop roles into Arch packages).
   - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle),
     `dev` (git config and direnv/nix-direnv integration), and `desktop`
     (Arch spawn commands for nixdesktop's session components).
 - Each module is real, working code with documented options. Not speculative;
   the patterns run daily in production.
-- The `ai-workstation` profile's package lists and home-manager modules are
-  starting points, not gospel. Home-manager modules are lean and config-only;
-  packages source from the system layer.
+- Home-manager modules are lean and config-only; packages source from the
+  system layer.
 - Still **not built**: integration test suite or end-to-end example machine config.
 
 What's landed is usable today on its own (see Usage below). What's missing is
@@ -231,72 +226,25 @@ services as data: configure options, enable/disable, set dependencies.
 }
 ```
 
-### ai-workstation profile
+### ai-workstation profile (removed)
 
-A curated starter combining all modules for ML/data-science workflows. GPU
-support, dev toolchains, scientific stacks, CUDA/ROCm.
+Dissolved 2026-07-27. It bundled two unrelated things behind one enable flag:
+GPU vendor toolchains, and a persona's dev tooling (`python`/`uv`, editors).
 
-```nix
-{
-  imports = [
-    inputs.nixarch.systemManagerModules.device-gids
-    inputs.nixarch.systemManagerModules.gshadow-sync
-    inputs.nixarch.systemManagerModules.packages
-    inputs.nixarch.profiles.ai-workstation
-  ];
-  
-  # Customize the profile's package lists (they are starting points)
-  nixarch.packages.development = [ "cuda" "pytorch" ];
-  nixarch.deviceGids = {
-    render = 500;
-    video = 501;
-    input = 502;
-  };
-}
-```
+Neither is nixarch's job. This project makes an Arch box Nix-manageable; a
+machine *class* — "an ML workstation" — is a composition on top of that, and
+the profile sat directly under a Scope section saying exactly that.
 
-### shell (home-manager)
+Where it went:
 
-A declarative shell environment bundle: fish, starship prompt, zoxide, and fzf.
+| Piece | Now lives in |
+|---|---|
+| GPU vendor toolchains (CUDA / ROCm) | [nixgpu][nixgpu]'s `toolchain` module, which exports a `systemManagerModules` class so this hub can install it |
+| `python`/`uv`, editors | [nixdev][nixdev] — language toolchains and the operator's toolbox |
 
-```nix
-{
-  imports = [ inputs.nixarch.homeManagerModules.shell ];
-  
-  nixarch.shell.enable = true;
-  
-  # Customize prompt colors and symbols (optional; sensible defaults included)
-  nixarch.shell.starship.preset = "nerd-font-symbols";
-}
-```
-
-### dev (home-manager)
-
-Declarative git configuration and direnv/nix-direnv integration for reproducible
-development environments.
-
-```nix
-{
-  imports = [ inputs.nixarch.homeManagerModules.dev ];
-  
-  nixarch.dev.enable = true;
-  
-  # Git identity (example values; use your own)
-  nixarch.dev.git.identity = {
-    name = "Example User";
-    email = "user@example.com";
-  };
-  
-  # Signing configuration (optional)
-  nixarch.dev.git.signing = {
-    enable = true;
-    format = "openpgp";
-    key = "XXXXXXXXXXXXXXXX";
-  };
-  
-  # direnv/nix-direnv is automatically configured when enabled
-}
-```
+The GPU package names — the profile's own header called them *"the one
+genuinely hard-to-get-right bit and the main reason this profile exists"* —
+carried over unchanged and are now asserted by a test in nixgpu.
 
 ### desktop-backend
 
@@ -390,7 +338,7 @@ Arch/CachyOS machines.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service, desktop-backend), `homeManagerModules` (shell, dev, desktop), profiles (ai-workstation), and `nixosModules` (gshadow-sync). |
+| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service, gcroot-guard, desktop-backend), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
 | `lib/` | Pure data shared across module classes — `desktop-roles.nix` (Arch resolution tables for nixdesktop roles) and `host-path.nix` (the host PATH every unit driving pacman/nix needs). |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |
@@ -415,6 +363,8 @@ generates config, `desktop-backend` here resolves those roles into Arch
 packages. Either works without the other.
 
 [nixdesktop]: https://github.com/julian-corbet/nixdesktop-corbet-ch
+[nixgpu]: https://github.com/julian-corbet/nixgpu-corbet-ch
+[nixdev]: https://github.com/julian-corbet/nixdev-corbet-ch
 
 ## License
 

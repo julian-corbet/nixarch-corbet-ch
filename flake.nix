@@ -35,7 +35,6 @@
         # GC root. Ships `nixarch-register` to fix it.
         gcroot-guard = ./modules/gcroot-guard.nix;
 
-        ai-workstation = ./profiles/ai-workstation.nix;
 
         # The Arch half of nixdesktop: resolves the roles nixdesktop declares into real pacman
         # packages. Import alongside nixdesktop.systemManagerModules.niri-desktop, which
