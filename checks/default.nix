@@ -16,9 +16,13 @@
 # experiments/gcroot-guard-eval.nix for what WAS verified against a live CachyOS box.
 { nixpkgs ? <nixpkgs>
 , nixdesktop ? ../../nixdesktop
+  # Threaded in rather than left to `builtins.currentSystem`, which does not exist during pure
+  # flake evaluation — reaching for it is what kept this suite unreachable from `flake check`.
+  # The default preserves the standalone `nix-instantiate --eval` invocation documented below.
+, system ? builtins.currentSystem
 }:
 let
-  pkgs = import nixpkgs { };
+  pkgs = import nixpkgs { inherit system; };
   lib = pkgs.lib;
   roles = import ../lib/desktop-roles.nix { inherit lib; };
   hostPaths = import ../lib/host-path.nix { inherit lib; };
@@ -359,7 +363,13 @@ let
     nixdesktop.niriDesktop.enable = false;
   };
 
-  desktopBackendChecks = [
+  # Gated on a nixdesktop checkout being reachable. nixarch deliberately does NOT take nixdesktop
+  # as a flake input -- the family contract's R4 is that modules couple by option value, never by
+  # dependency edge, and this backend reads `nixdesktop.want` precisely so no edge is needed. That
+  # means the flake cannot hand these checks a nixdesktop path, so `nix flake check` runs the suite
+  # WITHOUT them and the standalone invocation (which resolves a sibling checkout) runs them.
+  # The count of what was skipped is reported rather than swallowed -- see the derivation below.
+  desktopBackendChecks = if nixdesktop == null then [ ] else [
     (check "desktop-backend/file-manager-role-resolved"
       (lib.elem "thunar" pacmanDefault && lib.elem "tumbler" pacmanDefault && lib.elem "gvfs" pacmanDefault)
       "pacman: ${builtins.toJSON pacmanDefault}")
@@ -480,9 +490,18 @@ else {
   # every `check` assertion above) even if nothing else ever reads the attribute -- so the checks
   # really do run, not just get defined.
   eval-checks = pkgs.runCommand "nixarch-eval-checks"
-    { passedCount = toString (builtins.length results); }
+    {
+      passedCount = toString (builtins.length results);
+      # NOT silent: a suite that quietly covers less than it appears to is the failure this
+      # whole file exists to prevent, and it already happened once -- these assertions sat
+      # unreachable from any flake output and reported success without running.
+      skipped = if nixdesktop == null
+        then "desktop-backend (no nixdesktop checkout; run standalone for those)"
+        else "none";
+    }
     ''
       echo "all $passedCount nixarch eval checks passed"
+      echo "skipped: $skipped"
       touch $out
     '';
 }

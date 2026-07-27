@@ -69,12 +69,14 @@
       # `nixpkgs` is passed explicitly rather than left to its `<nixpkgs>` default, which would
       # resolve through NIX_PATH — an impurity that makes the result depend on the invoking
       # machine's channels rather than this flake's lock.
+      # `nixdesktop = null` because nixarch does not take it as an input (see the input comment
+      # above, and R4): the two desktop-backend checks need a nixdesktop checkout, so they run
+      # only in the standalone invocation. The suite reports what it skipped rather than hiding it.
       checks = forAllSystems (system:
-        (import ./checks { nixpkgs = nixpkgs.outPath; }) // {
-          formatting = nixpkgs.legacyPackages.${system}.runCommand "nixarch-fmt-check" { } ''
-            ${nixpkgs.legacyPackages.${system}.nixpkgs-fmt}/bin/nixpkgs-fmt --check ${./.} \
-              > /dev/null && touch $out
-          '';
+        import ./checks {
+          nixpkgs = nixpkgs.outPath;
+          inherit system;
+          nixdesktop = null;
         });
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
