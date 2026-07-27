@@ -22,6 +22,28 @@
 # the box before `aur` is non-empty. Install it once, manually, the normal
 # AUR way, then hand this module the rest of the declarative work.
 #
+# THE SAME CIRCULARITY APPLIES TO THE PACKAGE SOURCE ITSELF, and it is worth
+# stating because it looks at first like something this module should manage.
+# The keyring, the mirrorlist and the pacman hooks are what make `pacman`
+# able to fetch and verify anything. This module RUNS pacman. So they cannot
+# be declared here in any meaningful sense: the mechanism that would install
+# them is the mechanism that requires them to already exist. On plain Arch
+# that is `archlinux-keyring` + `pacman-mirrorlist`; on a derivative it is
+# that distro's own (CachyOS: `cachyos-keyring`, `cachyos-mirrorlist` and the
+# v3/v4 microarchitecture variants, `cachyos-hooks`).
+#
+# They are a PRECONDITION, alongside nix and an AUR helper — not a package
+# list. What this module can do about them is refuse to delete them, which is
+# what `keep` is for; see its description.
+#
+# The distinction generalises: a distro also ships packages that CONFIGURE the
+# system rather than install software (on CachyOS, `cachyos-settings` ships
+# sysctls, systemd drop-ins, udev rules and a zram-generator config). Declaring
+# those changes nothing — they are already installed, and what matters is
+# knowing which knobs they pre-set so an explicit declaration is deliberate
+# rather than an accidental inheritance. That is documentation, not a package
+# list; see studies/ for a worked example.
+#
 # PRUNING IS OPT-IN AND DANGEROUS: `pruneUndeclared` actually removes
 # packages (`pacman -Rns`) that are explicitly installed but not in your
 # declared lists. pacman has no concept of "this was here before your
@@ -155,12 +177,31 @@ in
 
     keep = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "base" "base-devel" ];
+      default = [ "base" "base-devel" "pacman" "archlinux-keyring" "pacman-mirrorlist" ];
       description = ''
         Package groups or exact names that are NEVER removed even when
         `pruneUndeclared` is on — the safety floor. Entries are expanded as
         pacman groups first (`pacman -Sqg`); anything that isn't a known
         group is kept as a literal package name.
+
+        THE PACKAGE MANAGER IS IN THE FLOOR ON PURPOSE. `pacman`,
+        `archlinux-keyring` and `pacman-mirrorlist` are NOT members of `base`
+        or `base-devel` — verified on a real Arch box, all three report as
+        outside both groups. Without them listed, `pruneUndeclared` would
+        `pacman -Rns pacman` on any host that had not thought to declare it:
+        the reconciler deleting the tool it runs, on a machine that then has
+        no way to put it back.
+
+        DERIVATIVE DISTROS MUST ADD THEIR OWN. An Arch derivative replaces
+        exactly these three with its own equivalents — on CachyOS that is
+        `cachyos-keyring`, `cachyos-mirrorlist` (plus the v3/v4 variants for
+        the microarchitecture repos) and `cachyos-hooks`. None of them are in
+        `base`/`base-devel` either, and this module cannot guess which
+        derivative it is running on, so a consumer on one MUST extend this
+        list. See the bootstrap note at the top of this file: those packages
+        are a PRECONDITION of this module, not something it can install —
+        the reconciler needs a working keyring and mirrorlist before it can
+        fetch anything at all.
       '';
     };
   };

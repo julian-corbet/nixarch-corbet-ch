@@ -107,8 +107,19 @@ let
       (pkgsPruneOn.nixarch.packages.pruneUndeclared == true)
       "got: ${builtins.toJSON pkgsPruneOn.nixarch.packages.pruneUndeclared}")
 
-    (check "packages/keep-default-floor"
-      (pkgsDefault.nixarch.packages.keep == [ "base" "base-devel" ])
+    # Assert the PROPERTY, not a snapshot of the list. What matters is that prune can never
+    # delete the tool it runs: `pacman`, `archlinux-keyring` and `pacman-mirrorlist` are members
+    # of neither `base` nor `base-devel` (verified on a real box), so if they are absent from this
+    # floor, `pruneUndeclared` on a host that forgot to declare them removes the package manager
+    # from a machine that then cannot reinstall it. Pinning the exact list instead would make this
+    # check fail on any legitimate addition while catching none of that.
+    (check "packages/keep-floor-protects-the-package-manager"
+      (builtins.all (p: builtins.elem p pkgsDefault.nixarch.packages.keep)
+        [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ])
+      "got: ${builtins.toJSON pkgsDefault.nixarch.packages.keep}")
+
+    (check "packages/keep-floor-retains-base-groups"
+      (builtins.all (p: builtins.elem p pkgsDefault.nixarch.packages.keep) [ "base" "base-devel" ])
       "got: ${builtins.toJSON pkgsDefault.nixarch.packages.keep}")
 
     (check "packages/unit-exists-when-enabled"
