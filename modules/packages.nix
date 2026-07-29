@@ -111,10 +111,15 @@ let
     aur_pkgs=(${lib.escapeShellArgs cfg.aur})
     keep_list=(${lib.escapeShellArgs (lib.unique (criticalKeep ++ cfg.keep))})
 
+    # Virtual-package dependency overrides, shared by BOTH transactions below.
+    # Empty-array expansion under `set -u` is safe on bash >= 4.4; every
+    # Arch-family box this module targets is well past that.
+    assume_args=(${lib.escapeShellArgs (lib.concatMap (p: [ "--assume-installed" p ]) cfg.assumeInstalled)})
+
     # --- 1. official-repo packages -----------------------------------------
     if [ ''${#pacman_pkgs[@]} -gt 0 ]; then
       echo "nixarch-packages: pacman -S --needed -> ''${pacman_pkgs[*]}"
-      pacman -S --needed --noconfirm "''${pacman_pkgs[@]}"
+      pacman -S --needed --noconfirm "''${assume_args[@]}" "''${pacman_pkgs[@]}"
     fi
 
     # --- 2. AUR packages -----------------------------------------------------
@@ -129,7 +134,7 @@ let
         echo "nixarch-packages: WARNING nixarch.packages.aur is non-empty but nixarch.packages.aurUser is null — skipping AUR reconcile. Set aurUser to a non-root account with a bootstrapped AUR helper and passwordless sudo."
       '' else ''
         echo "nixarch-packages: ${lib.escapeShellArg cfg.aurHelper} -S --needed (as ${lib.escapeShellArg cfg.aurUser}) -> ''${aur_pkgs[*]}"
-        runuser -u ${lib.escapeShellArg cfg.aurUser} -- ${lib.escapeShellArg cfg.aurHelper} -S --needed --noconfirm "''${aur_pkgs[@]}"
+        runuser -u ${lib.escapeShellArg cfg.aurUser} -- ${lib.escapeShellArg cfg.aurHelper} -S --needed --noconfirm "''${assume_args[@]}" "''${aur_pkgs[@]}"
       ''}
     fi
 
@@ -183,6 +188,37 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = "AUR packages to ensure installed, via an AUR helper (see `aurHelper`/`aurUser`).";
+    };
+
+    assumeInstalled = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "evdi=1.15.0" ];
+      description = ''
+        Dependencies to satisfy with a VIRTUAL package instead of a real one,
+        as `name=version` (pacman's `--assume-installed`). Applied to both the
+        `pacman` and the `aur` transaction.
+
+        This exists for the case where a dependency is genuinely present but
+        cannot be a package *here*: the canonical one is a container whose
+        kernel belongs to the host. A DisplayLink dock needs the `evdi` kernel
+        module, so its userspace package depends on `evdi` — but inside an LXC
+        that module is loaded by the HOST, and the guest has neither kernel
+        headers nor `CAP_SYS_MODULE`. Without this, pacman resolves the
+        dependency the only way it knows and drags a DKMS package into a
+        container that can neither build nor load it.
+
+        ⚠ This is a DEPENDENCY OVERRIDE, so it is only ever correct when you
+        know the dependency is satisfied by something outside pacman's view.
+        A wrong entry here does not fail loudly — it installs a package whose
+        requirements are not actually met, and the breakage surfaces at
+        runtime instead.
+
+        Scope note: this applies to the whole reconcile transaction, not to one
+        package. pacman has no per-package form of the flag, so a virtual entry
+        declared for one package is visible to every other package resolved in
+        the same run. Keep the list minimal for that reason.
+      '';
     };
 
     aurHelper = lib.mkOption {
