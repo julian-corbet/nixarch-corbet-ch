@@ -20,7 +20,7 @@ let
       # Path concatenation, NOT "${nixdesktop}/..." -- string interpolation of a path copies the
       # whole checkout (.git and all) into the store and then fails on it. This imports the one
       # file.
-      (nixdesktop + "/profiles/niri-desktop.nix")
+      (nixdesktop + "/profiles/desktop.nix")
       ../modules/desktop-backend.nix
 
       # Stub of the surface the backend writes into, rather than importing modules/packages.nix
@@ -31,6 +31,9 @@ let
         options.nixarch.packages = {
           enable = lib.mkEnableOption "stub";
           pacman = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+          # Both halves of the split, even though this experiment only reads `pacman`: the stub
+          # has to cover everything the module WRITES, not just what the check reads.
+          aur = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
         };
       })
 
@@ -40,7 +43,9 @@ let
           enable = true;
           extraPacman = [ "blueman" ];
         };
-        nixdesktop.niriDesktop.enable = true; # defaults: thunar, mate-polkit, waybar, foot...
+        # `compositor` has no default -- nixdesktop refuses to prefer one, so it must be named.
+        # defaults: thunar, mate-polkit, waybar, foot...
+        nixdesktop.desktop = { enable = true; compositor = "niri"; };
       }
     ];
   };

@@ -11,7 +11,7 @@
 # are shared with modules/desktop-backend.nix (lib/desktop-roles.nix), so the package that gets
 # installed and the binary that gets spawned cannot drift apart.
 #
-# WHY THE ROLE IS STATED TWICE (once here, once in nixdesktop.niriDesktop). system-manager and
+# WHY THE ROLE IS STATED TWICE (once here, once in nixdesktop.desktop). system-manager and
 # home-manager are separate evaluations with no shared config tree, so this module genuinely
 # cannot see what the system layer chose. Collapsing that duplication needs a mechanism above
 # both — a flake-level value threaded into each — which is a consumer-side pattern, not
@@ -32,7 +32,7 @@ in
       default = null;
       description = ''
         Polkit agent role — must match what the system layer installs
-        (`nixdesktop.niriDesktop.polkitAgent`). Sets nixdesktop's
+        (`nixdesktop.desktop.polkitAgent`). Sets nixdesktop's
         `session.polkitAgent.command` to this agent's Arch binary path.
 
         Null means no agent is spawned, which under niri means privileged GUI prompts never
@@ -44,7 +44,7 @@ in
       type = lib.types.nullOr (lib.types.enum (lib.attrNames roles.keyrings));
       default = null;
       description = ''
-        Secret-service role — must match `nixdesktop.niriDesktop.keyring`. Sets nixdesktop's
+        Secret-service role — must match `nixdesktop.desktop.keyring`. Sets nixdesktop's
         `session.keyring.command`. Set exactly one provider: two daemons racing for
         `org.freedesktop.secrets` presents as applications intermittently losing stored secrets.
       '';

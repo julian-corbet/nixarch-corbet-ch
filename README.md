@@ -259,7 +259,7 @@ profile publishes, resolves each role through
 ```nix
 {
   imports = [
-    inputs.nixdesktop.systemManagerModules.niri-desktop  # declares the roles
+    inputs.nixdesktop.systemManagerModules.desktop  # declares the roles
     inputs.nixarch.systemManagerModules.desktop-backend  # resolves them for Arch
     inputs.nixarch.systemManagerModules.packages         # installs them
   ];
@@ -267,7 +267,10 @@ profile publishes, resolves each role through
   nixarch.packages.enable = true;
   nixarch.desktopBackend.enable = true;
 
-  nixdesktop.niriDesktop.enable = true;  # defaults resolve to a complete session
+  nixdesktop.desktop = {
+    enable = true;
+    compositor = "niri";  # no default: nixdesktop prefers no compositor, so name one
+  };
 }
 ```
 

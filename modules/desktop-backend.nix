@@ -11,7 +11,7 @@
 # reads the same tables from the same file.
 #
 # IMPORT ORDER: this module reads an option that nixdesktop's profile declares, so both must be
-# in the same evaluation. Import `nixdesktop.systemManagerModules.niri-desktop` alongside it.
+# in the same evaluation. Import `nixdesktop.systemManagerModules.desktop` alongside it.
 { lib, config, ... }:
 let
   cfg = config.nixarch.desktopBackend;

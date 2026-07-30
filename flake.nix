@@ -37,7 +37,7 @@
 
 
         # The Arch half of nixdesktop: resolves the roles nixdesktop declares into real pacman
-        # packages. Import alongside nixdesktop.systemManagerModules.niri-desktop, which
+        # packages. Import alongside nixdesktop.systemManagerModules.desktop, which
         # declares the `nixdesktop.want` option this reads.
         desktop-backend = ./modules/desktop-backend.nix;
       };

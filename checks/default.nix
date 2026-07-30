@@ -398,12 +398,20 @@ let
 
   # Stub of the surface `nixarch.packages` provides -- deliberately NOT `../modules/packages.nix`
   # itself, which declares `systemd.services` and would need the system-manager surface stub too.
-  # What is under test here is role resolution into `nixarch.packages.pacman`, and this option
-  # alone is the entire contract desktop-backend.nix has with the reconciler.
+  # What is under test here is role resolution into `nixarch.packages.{pacman,aur}`, and those two
+  # options are the entire contract desktop-backend.nix has with the reconciler.
+  #
+  # BOTH halves must be stubbed, not just the one a given check reads. A stub narrower than the
+  # real option surface does not fail where it is incomplete -- it fails wherever the module under
+  # test writes an option the stub omits, with "the option does not exist" pointing at
+  # desktop-backend.nix rather than at this file. That is what happened when packages.nix split AUR
+  # names out of `pacman` into their own `aur` list: desktop-backend.nix followed the split, and
+  # this stub silently became a narrower surface than the thing it stands in for.
   desktopBackendStub = { lib, ... }: {
     options.nixarch.packages = {
       enable = lib.mkEnableOption "stub";
       pacman = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+      aur = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
     };
   };
 
@@ -411,17 +419,23 @@ let
     modules = [
       # Path concatenation, NOT "${nixdesktop}/..." -- string interpolation of a path copies the
       # whole checkout (.git and all) into the store and then fails on it. This imports one file.
-      (nixdesktop + "/profiles/niri-desktop.nix")
+      (nixdesktop + "/profiles/desktop.nix")
       ../modules/desktop-backend.nix
       desktopBackendStub
       extraConfig
     ];
   }).config;
 
+  # `compositor` has no default and is therefore mandatory wherever the profile is ENABLED:
+  # nixdesktop draws no distinction between compositors and refuses to prefer one, so the consumer
+  # must name it. It is deliberately absent from `desktopProfileDisabled` below -- a disabled
+  # profile resolves `nixdesktop.want` to `{}` without ever reading it, and setting it there would
+  # hide a regression that made the option load-bearing even when the desktop is off.
   desktopDefault = evalDesktopBackend {
     nixarch.packages.enable = true;
     nixarch.desktopBackend = { enable = true; extraPacman = [ "blueman" ]; };
-    nixdesktop.niriDesktop.enable = true; # defaults: thunar, mate-polkit, waybar, foot...
+    # defaults: thunar, mate-polkit, waybar, foot...
+    nixdesktop.desktop = { enable = true; compositor = "niri"; };
   };
   pacmanDefault = desktopDefault.nixarch.packages.pacman;
 
@@ -431,14 +445,14 @@ let
   desktopKdeOptIn = evalDesktopBackend {
     nixarch.packages.enable = true;
     nixarch.desktopBackend.enable = true;
-    nixdesktop.niriDesktop = { enable = true; polkitAgent = "polkit-kde-agent"; };
+    nixdesktop.desktop = { enable = true; compositor = "niri"; polkitAgent = "polkit-kde-agent"; };
   };
   pacmanKdeOptIn = desktopKdeOptIn.nixarch.packages.pacman;
 
   desktopProfileDisabled = evalDesktopBackend {
     nixarch.packages.enable = true;
     nixarch.desktopBackend.enable = true;
-    nixdesktop.niriDesktop.enable = false;
+    nixdesktop.desktop.enable = false;
   };
 
   # Gated on a nixdesktop checkout being reachable. nixarch deliberately does NOT take nixdesktop
@@ -474,7 +488,7 @@ let
 
     # THE regression this suite exists to catch: the old profile defaulted polkitAgent to
     # polkit-kde-agent, so an unopinionated consumer silently got a KDE Frameworks stack
-    # reinstalled on every activation. See nixdesktop's profiles/niri-desktop.nix header and
+    # reinstalled on every activation. See nixdesktop's profiles/desktop.nix header and
     # lib/desktop-roles.nix's polkitAgents table.
     (check "desktop-backend/no-kde-packages-by-default"
       (!(lib.elem "polkit-kde-agent" pacmanDefault) && !(lib.elem "qt6ct" pacmanDefault))
