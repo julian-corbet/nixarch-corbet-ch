@@ -18,37 +18,37 @@
 #      make the pseudo-terminal mount track the gid you actually chose.
 #
 # This module has no opinion on WHAT the gid numbers should be — that's a
-# per-user/per-fleet choice, supplied entirely via `nixarch.deviceGids`. With
+# per-user/cross-host choice, supplied entirely via `nixarch.deviceGids`. With
 # an empty map it is a complete no-op.
 #
-# ── Defaulting from nixid.posix.groups, never the reverse ───────────────────
+# ── Defaulting from nixiam.posix.groups, never the reverse ───────────────────
 # `nixarch.deviceGids` is the MECHANISM (pin + migrate + the tty/devpts
-# lockstep above); nixid's `posix.groups` (modules/posix.nix) is the TABLE — a
-# plain name-to-gid map, fleet-wide, for exactly the reason its own header
+# lockstep above); nixiam's `posix.groups` (modules/posix.nix) is the TABLE — a
+# plain name-to-gid map, cross-host, for exactly the reason its own header
 # gives: two machines that let the same group name auto-allocate
 # independently end up with different gid numbers, and anything using
 # AUTH_SYS (NFS's numeric-only security flavor) then grants or denies access
 # based on WHICH machine asked, not what the caller actually is. Before this
 # default existed, that table had to be restated by hand in every host's
 # `nixarch.deviceGids`, which is exactly the kind of copy this repo's sibling
-# `nixid` was built to make impossible — a fleet where render/video/input/tty
-# happen to sit at gids 400-416 on three machines only because someone typed
+# `nixiam` was built to make impossible — render/video/input/tty happening
+# to sit at gids 400-416 on three machines only because someone typed
 # 400-416 three times, with nothing asserting the three typings still agree.
 #
-# So: read `config.nixid.posix.groups` defensively (`or { }`) and let it
+# So: read `config.nixiam.posix.groups` defensively (`or { }`) and let it
 # become the DEFAULT for `nixarch.deviceGids`. Defensively, because this
-# repo takes nixid as neither a flake input nor an import — a host that has
-# never heard of nixid still evaluates this module fine, `cfg` is just
+# repo takes nixiam as neither a flake input nor an import — a host that has
+# never heard of nixiam still evaluates this module fine, `cfg` is just
 # `{ }`, and the whole module stays the no-op its header already promises.
-# A host that HAS composed nixid's posix module into its own configuration
-# (system-manager's module system is the same `lib.evalModules` nixid's pure
+# A host that HAS composed nixiam's posix module into its own configuration
+# (system-manager's module system is the same `lib.evalModules` nixiam's pure
 # option declarations were written against — see that module's own header:
 # no `pkgs`, no `systemd.services`, nothing NixOS-specific to be reachable
-# from) gets the fleet table for free. Either way, an explicitly-declared
+# from) gets the cross-host table for free. Either way, an explicitly-declared
 # `nixarch.deviceGids` on any one host still wins outright — a plain option
 # `default` is exactly the priority a hand-typed value already overrides, so
 # a host carving its own numbering (or one with no sibling module at all)
-# is completely unaffected. Direction stays one-way: nixid must never learn
+# is completely unaffected. Direction stays one-way: nixiam must never learn
 # this module, or a group name, or a gid — only ever be read from.
 { lib, pkgs, config, ... }:
 let
@@ -57,10 +57,10 @@ let
   enabled = config.nixarch.deviceGidsEnable;
 
   # See the header block above for why this is read defensively rather than
-  # imported: `or { }` resolves to the empty map both when nixid was never
+  # imported: `or { }` resolves to the empty map both when nixiam was never
   # composed into this configuration at all, and when it was but declared no
   # groups — the module cannot and need not tell those two cases apart.
-  nixidGroups = config.nixid.posix.groups or { };
+  nixiamGroups = config.nixiam.posix.groups or { };
 
   groupNames = builtins.attrNames cfg;
   migratePairs = lib.concatStringsSep " " (map (n: "${n}:${toString cfg.${n}}") groupNames);
@@ -86,12 +86,12 @@ in
 
     deviceGids = lib.mkOption {
       type = lib.types.attrsOf lib.types.int;
-      # Defaults from nixid's fleet-wide `posix.groups` table when that module has been
+      # Defaults from nixiam's cross-host `posix.groups` table when that module has been
       # composed into this configuration (read defensively; see the header block above for
       # why this is a default and never an import). Set this explicitly to override it, carve
       # your own numbering with no sibling module at all, or opt out with `{ }`.
-      default = nixidGroups;
-      defaultText = lib.literalExpression "config.nixid.posix.groups or { }";
+      default = nixiamGroups;
+      defaultText = lib.literalExpression "config.nixiam.posix.groups or { }";
       example = { render = 500; video = 501; };
       description = ''
         Map of group name -> gid to pin and, if the group already exists under
@@ -99,9 +99,9 @@ in
         `tty` to also enable the devpts lockstep below. An empty map makes
         this module a no-op.
 
-        Defaults to `config.nixid.posix.groups` (nixid's fleet-wide POSIX
-        group registry) when that module is present, so a fleet-wide gid
-        table only needs to be declared once, in nixid, rather than restated
+        Defaults to `config.nixiam.posix.groups` (nixiam's cross-host POSIX
+        group registry) when that module is present, so a cross-host gid
+        table only needs to be declared once, in nixiam, rather than restated
         per host here. Set this explicitly to pin a different map, or to
         override any one entry the default supplies.
       '';

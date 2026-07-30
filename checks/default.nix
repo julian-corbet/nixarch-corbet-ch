@@ -226,53 +226,53 @@ let
     nixarch.deviceGids = { render = 501; };
   };
 
-  # A minimal stand-in for nixid's own `options.nixid.posix.groups` (modules/posix.nix) --
+  # A minimal stand-in for nixiam's own `options.nixiam.posix.groups` (modules/posix.nix) --
   # not a checkout of that repo, since nixarch takes it as neither a flake input nor an
   # import (see modules/device-gids.nix's header). What is under test here is only that
-  # device-gids.nix reads `config.nixid.posix.groups` defensively and lets it become the
-  # DEFAULT for `nixarch.deviceGids` -- the same shape nixid's real option declares
+  # device-gids.nix reads `config.nixiam.posix.groups` defensively and lets it become the
+  # DEFAULT for `nixarch.deviceGids` -- the same shape nixiam's real option declares
   # (`attrsOf int`), stubbed the same way `systemManagerSurfaceStub` above stands in for
   # system-manager's own option surface.
-  nixidGroupsStub = { lib, ... }: {
-    options.nixid.posix.groups = lib.mkOption {
+  nixiamGroupsStub = { lib, ... }: {
+    options.nixiam.posix.groups = lib.mkOption {
       type = lib.types.attrsOf lib.types.int;
       default = { };
     };
   };
 
-  # nixid present, host names no explicit deviceGids of its own: the cross-host table becomes
+  # nixiam present, host names no explicit deviceGids of its own: the cross-host table becomes
   # the default. This is the whole point of the wiring -- see the module header's incident
   # (400-416 restated by hand on three machines with nothing asserting they agreed).
-  gidsFromNixid = (lib.evalModules {
+  gidsFromNixiam = (lib.evalModules {
     modules = [
       systemManagerSurfaceStub
       { _module.args.pkgs = pkgs; }
-      nixidGroupsStub
+      nixiamGroupsStub
       ../modules/device-gids.nix
-      { nixarch.deviceGidsEnable = true; nixid.posix.groups = { render = 400; tty = 403; }; }
+      { nixarch.deviceGidsEnable = true; nixiam.posix.groups = { render = 400; tty = 403; }; }
     ];
   }).config;
 
-  # A host that DOES declare its own map keeps it, even with nixid present and non-empty --
+  # A host that DOES declare its own map keeps it, even with nixiam present and non-empty --
   # rule 2 of the wiring: a hand-typed value is never second-guessed by the default it
   # overrides.
-  gidsExplicitOverridesNixid = (lib.evalModules {
+  gidsExplicitOverridesNixiam = (lib.evalModules {
     modules = [
       systemManagerSurfaceStub
       { _module.args.pkgs = pkgs; }
-      nixidGroupsStub
+      nixiamGroupsStub
       ../modules/device-gids.nix
       {
         nixarch.deviceGidsEnable = true;
-        nixid.posix.groups = { render = 400; };
+        nixiam.posix.groups = { render = 400; };
         nixarch.deviceGids = { render = 999; };
       }
     ];
   }).config;
 
-  # No nixid stub at all -- module must still evaluate (the no-op promise in its own
-  # header), exactly the host that has "never heard of nixid" the header describes.
-  gidsWithoutNixidAtAll = evalDeviceGids { nixarch.deviceGidsEnable = true; };
+  # No nixiam stub at all -- module must still evaluate (the no-op promise in its own
+  # header), exactly the host that has "never heard of nixiam" the header describes.
+  gidsWithoutNixiamAtAll = evalDeviceGids { nixarch.deviceGidsEnable = true; };
 
   deviceGidsChecks = [
     (check "device-gids/gid-map-renders-render"
@@ -306,34 +306,34 @@ let
       "ExecStart: ${builtins.toJSON (gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or null)}")
 
     # THE property this whole default exists for: a host that names no map of its own
-    # inherits nixid's cross-host table, including the `tty` entry driving the devpts
+    # inherits nixiam's cross-host table, including the `tty` entry driving the devpts
     # lockstep it would otherwise have had to also restate by hand.
-    (check "device-gids/default-inherits-nixid-posix-groups"
-      (gidsFromNixid.nixarch.deviceGids == { render = 400; tty = 403; })
-      "got: ${builtins.toJSON gidsFromNixid.nixarch.deviceGids}")
+    (check "device-gids/default-inherits-nixiam-posix-groups"
+      (gidsFromNixiam.nixarch.deviceGids == { render = 400; tty = 403; })
+      "got: ${builtins.toJSON gidsFromNixiam.nixarch.deviceGids}")
 
-    (check "device-gids/default-from-nixid-renders-into-users-groups"
-      ((unwrap (gidsFromNixid.users.groups.render.gid or null)) == 400)
-      "got: ${builtins.toJSON (unwrap (gidsFromNixid.users.groups.render.gid or null))}")
+    (check "device-gids/default-from-nixiam-renders-into-users-groups"
+      ((unwrap (gidsFromNixiam.users.groups.render.gid or null)) == 400)
+      "got: ${builtins.toJSON (unwrap (gidsFromNixiam.users.groups.render.gid or null))}")
 
-    (check "device-gids/default-from-nixid-activates-devpts-lockstep"
-      (gidsFromNixid.systemd.services ? "devpts-gid")
-      "systemd.services keys: ${builtins.toJSON (builtins.attrNames gidsFromNixid.systemd.services)}")
+    (check "device-gids/default-from-nixiam-activates-devpts-lockstep"
+      (gidsFromNixiam.systemd.services ? "devpts-gid")
+      "systemd.services keys: ${builtins.toJSON (builtins.attrNames gidsFromNixiam.systemd.services)}")
 
     # A hand-typed map is never second-guessed by the default it overrides -- a host
-    # carving its own numbering must be unaffected by nixid being present at all.
-    (check "device-gids/explicit-map-overrides-nixid-default"
-      (gidsExplicitOverridesNixid.nixarch.deviceGids == { render = 999; })
-      "got: ${builtins.toJSON gidsExplicitOverridesNixid.nixarch.deviceGids}")
+    # carving its own numbering must be unaffected by nixiam being present at all.
+    (check "device-gids/explicit-map-overrides-nixiam-default"
+      (gidsExplicitOverridesNixiam.nixarch.deviceGids == { render = 999; })
+      "got: ${builtins.toJSON gidsExplicitOverridesNixiam.nixarch.deviceGids}")
 
-    # The other half of the defensiveness promise: a host that has never composed nixid's
+    # The other half of the defensiveness promise: a host that has never composed nixiam's
     # posix module in at all (no stub, no option declared for it) must still evaluate,
     # with the module staying the complete no-op its own header promises.
-    (check "device-gids/no-nixid-at-all-is-still-a-no-op"
-      (gidsWithoutNixidAtAll.nixarch.deviceGids == { }
-        && gidsWithoutNixidAtAll.users.groups == { }
-        && gidsWithoutNixidAtAll.systemd.services == { })
-      "deviceGids: ${builtins.toJSON gidsWithoutNixidAtAll.nixarch.deviceGids}, users.groups: ${builtins.toJSON gidsWithoutNixidAtAll.users.groups}, systemd.services: ${builtins.toJSON (builtins.attrNames gidsWithoutNixidAtAll.systemd.services)}")
+    (check "device-gids/no-nixiam-at-all-is-still-a-no-op"
+      (gidsWithoutNixiamAtAll.nixarch.deviceGids == { }
+        && gidsWithoutNixiamAtAll.users.groups == { }
+        && gidsWithoutNixiamAtAll.systemd.services == { })
+      "deviceGids: ${builtins.toJSON gidsWithoutNixiamAtAll.nixarch.deviceGids}, users.groups: ${builtins.toJSON gidsWithoutNixiamAtAll.users.groups}, systemd.services: ${builtins.toJSON (builtins.attrNames gidsWithoutNixiamAtAll.systemd.services)}")
 
     # An empty map is a genuine no-op, not an empty-but-present unit -- the module's own header
     # promises exactly this ("With an empty map it is a complete no-op").
