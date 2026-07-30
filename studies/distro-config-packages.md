@@ -44,7 +44,7 @@ one is authoritative.
 **So the risk is not being overridden. The risk is not knowing you were relying on the distro.**
 Two real incidents on one host, both from this single package:
 
-1. **`vm.page-cluster`** read as `0` and nothing in the fleet had set it — it came from
+1. **`vm.page-cluster`** read as `0` and nothing in this family's own modules had set it — it came from
    `70-cachyos-settings.conf`. Declaring it `2` was then recorded as a deliberate behavioural
    change rather than a mystery.
 2. **NFS mount `TimeoutSec=15s`** was believed to come from the mount options. It did not — it came

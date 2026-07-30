@@ -240,7 +240,7 @@ let
     };
   };
 
-  # nixid present, host names no explicit deviceGids of its own: the fleet table becomes
+  # nixid present, host names no explicit deviceGids of its own: the cross-host table becomes
   # the default. This is the whole point of the wiring -- see the module header's incident
   # (400-416 restated by hand on three machines with nothing asserting they agreed).
   gidsFromNixid = (lib.evalModules {
@@ -306,7 +306,7 @@ let
       "ExecStart: ${builtins.toJSON (gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or null)}")
 
     # THE property this whole default exists for: a host that names no map of its own
-    # inherits nixid's fleet-wide table, including the `tty` entry driving the devpts
+    # inherits nixid's cross-host table, including the `tty` entry driving the devpts
     # lockstep it would otherwise have had to also restate by hand.
     (check "device-gids/default-inherits-nixid-posix-groups"
       (gidsFromNixid.nixarch.deviceGids == { render = 400; tty = 403; })
