@@ -20,12 +20,19 @@
   # flake evaluation — reaching for it is what kept this suite unreachable from `flake check`.
   # The default preserves the standalone `nix-instantiate --eval` invocation documented below.
 , system ? builtins.currentSystem
+  # `lib.probeFact` (github:julian-corbet/nixhost-corbet-ch) -- device-gids.nix now takes this as
+  # a closed-over function argument (see its own header + flake.nix's input comment), so its
+  # checks need one too. Defaults to resolving a sibling checkout the same way `nixdesktop` above
+  # does for the standalone invocation; `flake.nix`'s own `checks` composition overrides this with
+  # the REAL locked `nixhost.lib.probeFact` from its own flake input.
+, probeFact ? (import (../../nixhost + "/lib/facts.nix") { lib = (import nixpkgs { inherit system; }).lib; }).probeFact
 }:
 let
   pkgs = import nixpkgs { inherit system; };
   lib = pkgs.lib;
   roles = import ../lib/desktop-roles.nix { inherit lib; };
   hostPaths = import ../lib/host-path.nix { inherit lib; };
+  deviceGidsModule = import ../modules/device-gids.nix { inherit probeFact; };
 
   # Stub of the surface only system-manager itself provides. `systemd.services` and
   # `users.groups` are deliberately typed as opaque `attrsOf attrs` (mergeOneOption), exactly the
@@ -39,6 +46,11 @@ let
       systemd.services = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
       environment.systemPackages = lib.mkOption { type = lib.types.listOf lib.types.package; default = [ ]; };
       users.groups = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+      # A real system-manager/NixOS tree declares these itself (the assertions/warnings
+      # machinery); this hand-stubbed surface has to, too, now that device-gids.nix's own
+      # `probeFact` adoption writes to `config.warnings`.
+      warnings = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+      assertions = lib.mkOption { type = lib.types.listOf lib.types.attrs; default = [ ]; };
     };
   };
 
@@ -207,7 +219,7 @@ let
   # device-gids (modules/device-gids.nix)
   # ═══════════════════════════════════════════════════════════════════════════════════════════
 
-  evalDeviceGids = extraConfig: evalMod [ ../modules/device-gids.nix extraConfig ];
+  evalDeviceGids = extraConfig: evalMod [ deviceGidsModule extraConfig ];
 
   gidsRendered = evalDeviceGids {
     nixarch.deviceGidsEnable = true;
@@ -248,7 +260,7 @@ let
       systemManagerSurfaceStub
       { _module.args.pkgs = pkgs; }
       nixiamGroupsStub
-      ../modules/device-gids.nix
+      deviceGidsModule
       { nixarch.deviceGidsEnable = true; nixiam.posix.groups = { render = 400; tty = 403; }; }
     ];
   }).config;
@@ -261,7 +273,7 @@ let
       systemManagerSurfaceStub
       { _module.args.pkgs = pkgs; }
       nixiamGroupsStub
-      ../modules/device-gids.nix
+      deviceGidsModule
       {
         nixarch.deviceGidsEnable = true;
         nixiam.posix.groups = { render = 400; };

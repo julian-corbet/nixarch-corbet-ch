@@ -35,32 +35,49 @@
 # to sit at gids 400-416 on three machines only because someone typed
 # 400-416 three times, with nothing asserting the three typings still agree.
 #
-# So: read `config.nixiam.posix.groups` defensively (`or { }`) and let it
-# become the DEFAULT for `nixarch.deviceGids`. Defensively, because this
-# repo takes nixiam as neither a flake input nor an import — a host that has
-# never heard of nixiam still evaluates this module fine, `cfg` is just
-# `{ }`, and the whole module stays the no-op its header already promises.
-# A host that HAS composed nixiam's posix module into its own configuration
-# (system-manager's module system is the same `lib.evalModules` nixiam's pure
-# option declarations were written against — see that module's own header:
-# no `pkgs`, no `systemd.services`, nothing NixOS-specific to be reachable
-# from) gets the cross-host table for free. Either way, an explicitly-declared
+# So: read `config.nixiam.posix.groups` through `lib.probeFact`
+# (github:julian-corbet/nixhost-corbet-ch, `lib/facts.nix`) and let the
+# resolved value become the DEFAULT for `nixarch.deviceGids`. This repo
+# takes nixiam as neither a flake input nor an import — a bare
+# `config.nixiam.posix.groups or { }` cannot tell "nixiam was never composed
+# here" (legitimate, silent) from "nixiam IS composed, but `posix.groups`
+# moved, was renamed, or its value was rejected by its own type" (a defect,
+# and a bare `or` hides it exactly as silently as the first case) — see
+# nixhost's own `lib/facts.nix` header for the full defect class and the two
+# evaluation traps a naive fix falls into. `probeFact` answers which of the
+# two happened: `state == "absent"` for a host that has never heard of
+# nixiam (still evaluates this module fine, exactly the no-op its header
+# already promises), `state == "unresolved"` for the composed-but-broken
+# case (falls back to `{ }` the same as absent, but ALSO renders a warning —
+# see `groupsProbe`'s use in `config` below), `state == "resolved"` for the
+# healthy case this module was built for. A host that HAS composed nixiam's
+# posix module (system-manager's module system is the same `lib.evalModules`
+# nixiam's pure option declarations were written against) gets the
+# cross-host table for free. Either way, an explicitly-declared
 # `nixarch.deviceGids` on any one host still wins outright — a plain option
 # `default` is exactly the priority a hand-typed value already overrides, so
 # a host carving its own numbering (or one with no sibling module at all)
 # is completely unaffected. Direction stays one-way: nixiam must never learn
 # this module, or a group name, or a gid — only ever be read from.
+{ probeFact }:
 { lib, pkgs, config, ... }:
 let
   cfg = config.nixarch.deviceGids;
   ttyCfg = config.nixarch.ttyDevpts;
   enabled = config.nixarch.deviceGidsEnable;
 
-  # See the header block above for why this is read defensively rather than
-  # imported: `or { }` resolves to the empty map both when nixiam was never
-  # composed into this configuration at all, and when it was but declared no
-  # groups — the module cannot and need not tell those two cases apart.
-  nixiamGroups = config.nixiam.posix.groups or { };
+  # See the header block above for why this goes through `probeFact` rather than a bare `or`:
+  # `state == "absent"` and `state == "unresolved"` both resolve `value` to `fallback` (`{ }`) --
+  # deliberately indistinguishable to `nixiamGroups` itself, since either way the safe behavior
+  # here is "no default to offer" -- but `groupsProbe.warnings` (spliced into `config.warnings`
+  # below) is what tells the two apart for whoever reads the build output.
+  groupsProbe = probeFact {
+    inherit config;
+    namespace = "nixiam";
+    path = "posix.groups";
+    fallback = { };
+  };
+  nixiamGroups = groupsProbe.value;
 
   groupNames = builtins.attrNames cfg;
   migratePairs = lib.concatStringsSep " " (map (n: "${n}:${toString cfg.${n}}") groupNames);
@@ -121,35 +138,49 @@ in
     };
   };
 
-  config = lib.mkIf (enabled && groupNames != [ ]) {
-    # Declaration (correct for fresh accounts).
-    users.groups = lib.genAttrs groupNames (n: { gid = lib.mkForce cfg.${n}; });
+  config = lib.mkMerge [
+    # The probe's warning is gated on `enabled` ALONE, deliberately never on `groupNames != [ ]`
+    # too: state "absent" and state "unresolved" both resolve `nixiamGroups` to the SAME fallback
+    # (`{ }`), so gating the warning on the resolved map being non-empty would hide it in exactly
+    # the case it exists to report -- a host that leans on the nixiam default (no explicit
+    # `nixarch.deviceGids` of its own), where nixiam turns out to be composed but broken, ends up
+    # with `groupNames == [ ]` from the fallback and would silently never see the warning render.
+    # Gating on `enabled` alone keeps the module's own "complete no-op when disabled" promise
+    # intact (a host that never turns this mechanism on sees zero effect from it, warnings
+    # included) while making the warning visible in every case where it might matter.
+    (lib.mkIf enabled {
+      warnings = groupsProbe.warnings;
+    })
+    (lib.mkIf (enabled && groupNames != [ ]) {
+      # Declaration (correct for fresh accounts).
+      users.groups = lib.genAttrs groupNames (n: { gid = lib.mkForce cfg.${n}; });
 
-    # Migration (renumbers pre-existing groups; idempotent no-op once converged).
-    systemd.services.gid-migrate = {
-      description = "Migrate existing device groups to the gids in nixarch.deviceGids";
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${migrate}"; };
-    };
-
-    # devpts lockstep — only when the caller pinned `tty`, since without it there is no
-    # canonical tty gid to remount to.
-    systemd.services.devpts-gid = lib.mkIf (ttyGid != null) {
-      description = "Pin /dev/pts to the configured tty gid";
-      # multi-user.target (not sysinit) so system-manager (re)starts it on a live ACTIVATION,
-      # not only at boot — sysinit is already passed when you `switch`, so a sysinit-wanted
-      # unit would silently not fire.
-      wantedBy = [ "multi-user.target" ];
-      before = [ "systemd-user-sessions.service" ];
-      after = [ "systemd-remount-fs.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = [
-          "${pkgs.util-linux}/bin/mount -o remount,gid=${toString ttyGid},mode=${ttyCfg.mode},ptmxmode=${ttyCfg.ptmxmode} devpts /dev/pts"
-          "-${pkgs.coreutils}/bin/chgrp ${toString ttyGid} /dev/ptmx"
-        ];
+      # Migration (renumbers pre-existing groups; idempotent no-op once converged).
+      systemd.services.gid-migrate = {
+        description = "Migrate existing device groups to the gids in nixarch.deviceGids";
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${migrate}"; };
       };
-    };
-  };
+
+      # devpts lockstep — only when the caller pinned `tty`, since without it there is no
+      # canonical tty gid to remount to.
+      systemd.services.devpts-gid = lib.mkIf (ttyGid != null) {
+        description = "Pin /dev/pts to the configured tty gid";
+        # multi-user.target (not sysinit) so system-manager (re)starts it on a live ACTIVATION,
+        # not only at boot — sysinit is already passed when you `switch`, so a sysinit-wanted
+        # unit would silently not fire.
+        wantedBy = [ "multi-user.target" ];
+        before = [ "systemd-user-sessions.service" ];
+        after = [ "systemd-remount-fs.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = [
+            "${pkgs.util-linux}/bin/mount -o remount,gid=${toString ttyGid},mode=${ttyCfg.mode},ptmxmode=${ttyCfg.ptmxmode} devpts /dev/pts"
+            "-${pkgs.coreutils}/bin/chgrp ${toString ttyGid} /dev/ptmx"
+          ];
+        };
+      };
+    })
+  ];
 }

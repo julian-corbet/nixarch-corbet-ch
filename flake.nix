@@ -1,15 +1,30 @@
 {
   description = "nixarch — declarative Arch/CachyOS workstations, managed the Nix way (pre-alpha scaffold)";
 
-  # ONE INPUT. The desktop modules that used to live here moved to nixdesktop, and the noctalia
+  # TWO INPUTS. The desktop modules that used to live here moved to nixdesktop, and the noctalia
   # flake they needed went with them -- a QML shell has no business in the closure of a project
   # about Arch package management. nixdesktop is deliberately NOT an input either: the desktop
   # backend below reads an option that nixdesktop's profile declares, which means a consumer
   # imports both flakes anyway, and adding it here would only force a fetch on every evaluation
   # for the many consumers who use nixarch without a desktop at all.
+  #
+  # nixhost IS an input, for exactly one thing: `lib.probeFact`/`lib.collectProbes`
+  # (github:julian-corbet/nixhost-corbet-ch, `lib/facts.nix`) -- the shared, plain-function fix for
+  # the cross-namespace defensive-read defect class (a bare `config.nixfoo.bar or fallback` cannot
+  # tell "nixfoo not composed here" from "nixfoo composed but `bar` moved/renamed/rejected" -- see
+  # nixhost's own `lib/facts.nix` header). `device-gids.nix`'s own `config.nixiam.posix.groups`
+  # read is exactly this shape, so it takes `probeFact` closed over as a plain function argument
+  # (below), never `_module.args` -- the same partially-applied-before-the-module-system-sees-it
+  # pattern this family already uses for `nixfsCatalogue` (see infra's own flake.nix comment on
+  # `mkNixnas` for that precedent) -- so a consumer importing `systemManagerModules.device-gids`
+  # sees an ordinary module function and never needs to know `probeFact` exists.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.nixhost = {
+    url = "github:julian-corbet/nixhost-corbet-ch";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, nixhost }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [
         "x86_64-linux"
@@ -26,7 +41,10 @@
       lib = { };
       systemManagerModules = {
         gshadow-sync = ./modules/gshadow-sync.nix;
-        device-gids = ./modules/device-gids.nix;
+        # `probeFact` closed over here, before the module system ever sees the result -- see the
+        # input comment above. The exported value is a plain module function taking the usual
+        # `{ config, lib, pkgs, ... }`; nothing about consuming it changes.
+        device-gids = import ./modules/device-gids.nix { inherit (nixhost.lib) probeFact; };
         packages = ./modules/packages.nix;
         foreign-service = ./modules/foreign-service.nix;
 
@@ -77,6 +95,9 @@
           nixpkgs = nixpkgs.outPath;
           inherit system;
           nixdesktop = null;
+          # Unlike nixdesktop above, nixhost genuinely IS a flake input (see the input comment) --
+          # so `nix flake check` gets the real, locked `nixhost.lib.probeFact` here, not a stub.
+          probeFact = nixhost.lib.probeFact;
         });
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
