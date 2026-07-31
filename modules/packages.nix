@@ -78,8 +78,7 @@ let
   # ADDITIVE, not a replacement. Verified by reading /etc/pacman.conf on a live CachyOS box:
   # `[core]`, `[extra]` and `[multilib]` all `Include = /etc/pacman.d/mirrorlist` — Arch's own,
   # shipped by `pacman-mirrorlist` — while only the `[cachyos*]` repos use the CachyOS lists. A
-  # derivative therefore needs BOTH keyrings and BOTH mirrorlists, and an earlier version of
-  # this file's own documentation was wrong to say a derivative "replaces exactly these three".
+  # derivative therefore needs BOTH keyrings and BOTH mirrorlists, not just its own three.
   #
   # Deliberately narrow: only what pacman needs to FETCH AND VERIFY. `cachyos-settings`
   # (sysctls, udev rules, a zram-generator config) and `cachyos-rate-mirrors` (ranks mirrors)
@@ -319,12 +318,11 @@ in
 
         DERIVATIVE DISTROS ARE HANDLED BY `distro`, NOT HERE. Set
         `distro = "cachyos"` and the derivative's keyring, mirrorlists and pacman
-        hooks join the floor on the same non-overridable terms. This used to be
-        the consumer's job via this option, which was the wrong place for it: a
-        floor expressed in a plain `listOf` disappears the moment a host sets that
-        list for some unrelated reason, and the packages in question are the
-        PRECONDITION for fetching anything — lose them and the machine cannot
-        reinstall them.
+        hooks join the floor on the same non-overridable terms — never add them to
+        `keep` itself: a floor expressed in a plain `listOf` disappears the moment
+        a host sets that list for some unrelated reason, and the packages in
+        question are the PRECONDITION for fetching anything — lose them and the
+        machine cannot reinstall them.
 
         Note that a derivative ADDS to the Arch floor rather than replacing it.
         On CachyOS, `[core]`, `[extra]` and `[multilib]` still resolve through

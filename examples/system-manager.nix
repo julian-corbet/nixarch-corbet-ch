@@ -11,13 +11,6 @@
 { config, lib, ... }:
 
 {
-  # Import the two nixarch system-manager modules.
-  # In your own flake.nix, add nixarch as an input:
-  #   nixarch.url = "github:user/nixarch";
-  # Then reference them here or in a configuration file:
-  #   imports = [ inputs.nixarch.systemManagerModules.gshadow-sync
-  #               inputs.nixarch.systemManagerModules.device-gids ];
-
   # ============================================================================
   # gshadow-sync: heal /etc/gshadow after userborn writes /etc/group
   # ============================================================================

@@ -165,9 +165,8 @@ let
 
     # THE SAME PROPERTY ONE DISTRO LAYER DOWN. A derivative serves its own repos from its own
     # mirrorlists signed by its own keyring; those packages are the precondition for fetching
-    # anything, so pruning them leaves a machine that cannot reinstall them. Before `distro`
-    # existed this was the consumer's job via `keep` -- which is the one place it could not
-    # safely live, because setting `keep` for any unrelated reason silently dropped it. Asserted
+    # anything, so pruning them leaves a machine that cannot reinstall them. `keep` alone cannot
+    # safely hold this: setting it for any unrelated reason would silently drop it. Asserted
     # against a config that does exactly that.
     (check "packages/prune-cannot-delete-a-derivative-package-manager"
       (builtins.all (p: lib.elem p pkgsCachyos.nixarch.packages.effectiveKeep)
@@ -238,15 +237,15 @@ let
     nixarch.deviceGids = { render = 501; };
   };
 
-  # A minimal stand-in for nixiam's own `options.nixiam.posix.groups` (modules/posix.nix) --
+  # A minimal stand-in for nixiam's own `options.nixiam.posix.deviceGroups` (modules/posix.nix) --
   # not a checkout of that repo, since nixarch takes it as neither a flake input nor an
   # import (see modules/device-gids.nix's header). What is under test here is only that
-  # device-gids.nix reads `config.nixiam.posix.groups` defensively and lets it become the
+  # device-gids.nix reads `config.nixiam.posix.deviceGroups` defensively and lets it become the
   # DEFAULT for `nixarch.deviceGids` -- the same shape nixiam's real option declares
   # (`attrsOf int`), stubbed the same way `systemManagerSurfaceStub` above stands in for
   # system-manager's own option surface.
-  nixiamGroupsStub = { lib, ... }: {
-    options.nixiam.posix.groups = lib.mkOption {
+  nixiamDeviceGroupsStub = { lib, ... }: {
+    options.nixiam.posix.deviceGroups = lib.mkOption {
       type = lib.types.attrsOf lib.types.int;
       default = { };
     };
@@ -259,9 +258,9 @@ let
     modules = [
       systemManagerSurfaceStub
       { _module.args.pkgs = pkgs; }
-      nixiamGroupsStub
+      nixiamDeviceGroupsStub
       deviceGidsModule
-      { nixarch.deviceGidsEnable = true; nixiam.posix.groups = { render = 400; tty = 403; }; }
+      { nixarch.deviceGidsEnable = true; nixiam.posix.deviceGroups = { render = 400; tty = 403; }; }
     ];
   }).config;
 
@@ -272,11 +271,11 @@ let
     modules = [
       systemManagerSurfaceStub
       { _module.args.pkgs = pkgs; }
-      nixiamGroupsStub
+      nixiamDeviceGroupsStub
       deviceGidsModule
       {
         nixarch.deviceGidsEnable = true;
-        nixiam.posix.groups = { render = 400; };
+        nixiam.posix.deviceGroups = { render = 400; };
         nixarch.deviceGids = { render = 999; };
       }
     ];
@@ -320,7 +319,7 @@ let
     # THE property this whole default exists for: a host that names no map of its own
     # inherits nixiam's cross-host table, including the `tty` entry driving the devpts
     # lockstep it would otherwise have had to also restate by hand.
-    (check "device-gids/default-inherits-nixiam-posix-groups"
+    (check "device-gids/default-inherits-nixiam-posix-device-groups"
       (gidsFromNixiam.nixarch.deviceGids == { render = 400; tty = 403; })
       "got: ${builtins.toJSON gidsFromNixiam.nixarch.deviceGids}")
 

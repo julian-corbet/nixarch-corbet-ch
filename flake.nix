@@ -1,12 +1,10 @@
 {
   description = "nixarch — declarative Arch/CachyOS workstations, managed the Nix way (pre-alpha scaffold)";
 
-  # TWO INPUTS. The desktop modules that used to live here moved to nixdesktop, and the noctalia
-  # flake they needed went with them -- a QML shell has no business in the closure of a project
-  # about Arch package management. nixdesktop is deliberately NOT an input either: the desktop
-  # backend below reads an option that nixdesktop's profile declares, which means a consumer
-  # imports both flakes anyway, and adding it here would only force a fetch on every evaluation
-  # for the many consumers who use nixarch without a desktop at all.
+  # TWO INPUTS. nixdesktop is deliberately NOT an input: the desktop backend below reads an
+  # option that nixdesktop's profile declares, which means a consumer imports both flakes anyway,
+  # and adding it here would only force a fetch on every evaluation for the many consumers who use
+  # nixarch without a desktop at all.
   #
   # nixhost IS an input, for exactly one thing: `lib.probeFact`/`lib.collectProbes`
   # (github:julian-corbet/nixhost-corbet-ch, `lib/facts.nix`) -- the shared, plain-function fix for
@@ -14,9 +12,7 @@
   # tell "nixfoo not composed here" from "nixfoo composed but `bar` moved/renamed/rejected" -- see
   # nixhost's own `lib/facts.nix` header). `device-gids.nix`'s own `config.nixiam.posix.groups`
   # read is exactly this shape, so it takes `probeFact` closed over as a plain function argument
-  # (below), never `_module.args` -- the same partially-applied-before-the-module-system-sees-it
-  # pattern this family already uses for `nixfsCatalogue` (see infra's own flake.nix comment on
-  # `mkNixnas` for that precedent) -- so a consumer importing `systemManagerModules.device-gids`
+  # (below), never `_module.args` -- so a consumer importing `systemManagerModules.device-gids`
   # sees an ordinary module function and never needs to know `probeFact` exists.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.nixhost = {
@@ -32,12 +28,8 @@
       ];
     in
     {
-      # Extraction is in progress. The first two real modules have landed
-      # under system-manager: a device-gid registry and a gshadow/group
-      # hygiene fix. Everything else here is still an intentionally empty
-      # placeholder — real content lands module by module as it is
-      # generalized out of the private configuration it started life in.
-      # See the Roadmap in README.md.
+      # Modules land here as they are generalized out of private configuration into a reusable,
+      # public shape; see README.md for the roadmap and current module list.
       lib = { };
       systemManagerModules = {
         gshadow-sync = ./modules/gshadow-sync.nix;

@@ -52,14 +52,10 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Targets nixdesktop's `session` module, not its `niri` module. These two
-    # components used to be spawned by niri itself via `spawn-at-startup` lines in
-    # config.kdl, and this backend filled in `nixdesktop.niri.polkitAgentCommand`
-    # / `keyringCommand` accordingly. That mechanism could not work: a
-    # spawn-at-startup line runs once at session start and cannot fire into an
-    # already-running session, so switching configuration silently failed to start
-    # anything until the next login. nixdesktop moved both components to systemd
-    # user services, and the command strings go there now.
+    # Targets nixdesktop's `session` module: a spawn-at-startup-style line runs once at session
+    # start and cannot fire into an already-running session, so switching configuration would
+    # silently fail to start anything until the next login. systemd user services don't have that
+    # problem, which is why these command strings go there.
     #
     # `enable` is set here as well as `command`. The session module ships every
     # component off by default, so naming a command without enabling it would
