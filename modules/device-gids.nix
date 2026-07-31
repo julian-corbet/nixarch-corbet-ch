@@ -28,12 +28,10 @@
 # gives: two machines that let the same group name auto-allocate
 # independently end up with different gid numbers, and anything using
 # AUTH_SYS (NFS's numeric-only security flavor) then grants or denies access
-# based on WHICH machine asked, not what the caller actually is. Before this
-# default existed, that table had to be restated by hand in every host's
-# `nixarch.deviceGids`, which is exactly the kind of copy this repo's sibling
-# `nixiam` was built to make impossible — render/video/input/tty happening
-# to sit at gids 400-416 on three machines only because someone typed
-# 400-416 three times, with nothing asserting the three typings still agree.
+# based on WHICH machine asked, not what the caller actually is. Defaulting
+# from that table here means the cross-host numbering is declared exactly
+# once, in nixiam, rather than restated by hand in every host's
+# `nixarch.deviceGids` with nothing asserting the copies still agree.
 #
 # So: read `config.nixiam.posix.groups` through `lib.probeFact`
 # (github:julian-corbet/nixhost-corbet-ch, `lib/facts.nix`) and let the
@@ -73,8 +71,13 @@ let
   # below) is what tells the two apart for whoever reads the build output.
   groupsProbe = probeFact {
     inherit config;
-    namespace = "nixiam";
-    path = "posix.groups";
+    # `deviceGroups`, not `groups`: nixiam split the two because they need opposite number
+    # policies. This module is the device half -- names the platform already knows (`video`,
+    # `render`, `input`, `wheel`), which must stay below a distro's dynamic-allocation floor or the
+    # pinning is undone on the next package install. Shared groups this fleet hands out live in
+    # `groups` and use the high band.
+    namespace = "nixiam.posix";
+    path = "deviceGroups";
     fallback = { };
   };
   nixiamGroups = groupsProbe.value;
