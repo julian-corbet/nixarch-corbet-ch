@@ -115,6 +115,19 @@ let
     };
   };
 
+  # pruneOrphans is a SEPARATE toggle from pruneUndeclared above -- deliberately not combined
+  # with pkgsPruneOn, so the checks below can prove the two do not silently imply each other.
+  pkgsOrphanPruneOn = evalPackages { nixarch.packages = { enable = true; pruneOrphans = true; }; };
+  # The orphan sweep reuses the exact same `keep_list` computation as pruneUndeclared (see
+  # `expand_keep` in modules/packages.nix) -- this proves the package-manager floor survives a
+  # `keep` override on THIS path too, not just pruneUndeclared's.
+  pkgsOrphanKeepOverridden = evalPackages {
+    nixarch.packages = { enable = true; pruneOrphans = true; keep = [ "something-unrelated" ]; };
+  };
+  pkgsOrphanMaxRoundsCustom = evalPackages {
+    nixarch.packages = { enable = true; pruneOrphans = true; orphanSweepMaxRounds = 3; };
+  };
+
   packagesChecks = [
     (check "packages/pacman-declared-round-trips"
       (pkgsDeclared.nixarch.packages.pacman == [ "git" "vim" ])
@@ -145,6 +158,44 @@ let
     (check "packages/prune-undeclared-explicit-opt-in-works"
       (pkgsPruneOn.nixarch.packages.pruneUndeclared == true)
       "got: ${builtins.toJSON pkgsPruneOn.nixarch.packages.pruneUndeclared}")
+
+    # pruneOrphans: the separate, `-Qdtq`-keyed sweep. Same off-by-default safety posture as
+    # pruneUndeclared, proven the same way.
+    (check "packages/prune-orphans-defaults-off"
+      (pkgsDefault.nixarch.packages.pruneOrphans == false)
+      "got: ${builtins.toJSON pkgsDefault.nixarch.packages.pruneOrphans}")
+
+    (check "packages/prune-orphans-explicit-opt-in-works"
+      (pkgsOrphanPruneOn.nixarch.packages.pruneOrphans == true)
+      "got: ${builtins.toJSON pkgsOrphanPruneOn.nixarch.packages.pruneOrphans}")
+
+    # The two prune paths are INDEPENDENT toggles -- turning one on must never silently flip
+    # the other, since they sweep structurally different things (explicit vs. dependency-reason
+    # installs) and a caller may legitimately want only one.
+    (check "packages/prune-orphans-does-not-imply-prune-undeclared"
+      (pkgsOrphanPruneOn.nixarch.packages.pruneUndeclared == false)
+      "got: ${builtins.toJSON pkgsOrphanPruneOn.nixarch.packages.pruneUndeclared}")
+
+    (check "packages/prune-undeclared-does-not-imply-prune-orphans"
+      (pkgsPruneOn.nixarch.packages.pruneOrphans == false)
+      "got: ${builtins.toJSON pkgsPruneOn.nixarch.packages.pruneOrphans}")
+
+    (check "packages/orphan-sweep-max-rounds-default"
+      (pkgsDefault.nixarch.packages.orphanSweepMaxRounds == 5)
+      "got: ${builtins.toJSON pkgsDefault.nixarch.packages.orphanSweepMaxRounds}")
+
+    (check "packages/orphan-sweep-max-rounds-round-trips"
+      (pkgsOrphanMaxRoundsCustom.nixarch.packages.orphanSweepMaxRounds == 3)
+      "got: ${builtins.toJSON pkgsOrphanMaxRoundsCustom.nixarch.packages.orphanSweepMaxRounds}")
+
+    # THE SAME PROPERTY `prune-cannot-delete-the-package-manager` proves for pruneUndeclared,
+    # proven on the orphan-sweep path too: both prune blocks call the same `expand_keep` helper
+    # over the same `keep_list`, so this pins that the sharing is real rather than incidental --
+    # if a future edit gave pruneOrphans its own, un-union'd keep computation, this would catch it.
+    (check "packages/prune-orphans-cannot-delete-the-package-manager"
+      (builtins.all (p: lib.elem p pkgsOrphanKeepOverridden.nixarch.packages.effectiveKeep)
+        [ "pacman" "archlinux-keyring" "pacman-mirrorlist" ])
+      "consumer set keep = [ something-unrelated ] with pruneOrphans = true; effectiveKeep = ${builtins.toJSON pkgsOrphanKeepOverridden.nixarch.packages.effectiveKeep}")
 
     # The floor a consumer never touches.
     (check "packages/keep-default-floor"

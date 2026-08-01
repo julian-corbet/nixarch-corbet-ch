@@ -52,6 +52,24 @@
 # `keep` is the safety floor under it: groups/names that are never removed
 # even with pruning on, defaulting to the two groups a running Arch system
 # cannot lose.
+#
+# A SEPARATE, ALSO-DANGEROUS KNOB: `pruneOrphans`. `pruneUndeclared` diffs against
+# `pacman -Qqe` — EXPLICITLY installed packages — because that is the only install reason a
+# declaration can meaningfully claim credit for. A genuine pacman orphan (`pacman -Qdtq`:
+# installed as someone else's DEPENDENCY, and now required by nothing) is invisible to that diff
+# no matter what `pruneUndeclared` is set to: it was never explicit, so it was never
+# "undeclared" in the sense that option checks. Naming the same package in `pacman` does not fix
+# this either — the reconcile above runs `pacman -S --needed`, and `--needed` skips a package
+# that is already installed WITHOUT promoting its install reason from dependency to explicit, so
+# a package that predates its own declaration can sit as a permanent "orphan" even while
+# genuinely declared (verified live: a host that declared a language toolchain nixdev had
+# already pulled in earlier as a build dependency stayed orphaned across reconciles until the
+# declaration was dropped, because `--needed` never touched its reason bit). `pruneOrphans` is
+# the dedicated sweep for the genuine case: `pacman -Rns` on the live `pacman -Qdtq` set,
+# filtered through the same `keep`/`effectiveKeep` floor as `pruneUndeclared`. Off by default,
+# for the same reason `pruneUndeclared` is: an orphan you rely on but happen to have installed
+# only as a dependency (a library pulled in once by something you later removed by hand, say)
+# looks identical to genuine drift.
 { lib, pkgs, config, ... }:
 let
   cfg = config.nixarch.packages;
@@ -110,6 +128,21 @@ let
     aur_pkgs=(${lib.escapeShellArgs cfg.aur})
     keep_list=(${lib.escapeShellArgs (lib.unique (criticalKeep ++ cfg.keep))})
 
+    # Shared by both prune paths below (steps 3 and 4): expand `keep` entries as pacman
+    # groups first (`pacman -Sqg`) — the way `keep`'s own option doc says it works — falling
+    # back to the literal name for anything that is not a known group.
+    expand_keep() {
+      local k grp
+      for k in "''${keep_list[@]}"; do
+        grp=$(pacman -Sqg "$k" 2>/dev/null || true)
+        if [ -n "$grp" ]; then
+          printf '%s\n' "$grp"
+        else
+          printf '%s\n' "$k"
+        fi
+      done
+    }
+
     # Virtual-package dependency overrides, shared by BOTH transactions below.
     # Empty-array expansion under `set -u` is safe on bash >= 4.4; every
     # Arch-family box this module targets is well past that.
@@ -144,22 +177,7 @@ let
     # `keep` together actually describe the box you want.
     ${lib.optionalString cfg.pruneUndeclared ''
       installed=$(pacman -Qqe | LC_ALL=C sort -u)
-
-      # Expand `keep` groups to their member packages; anything that is not a
-      # known group (a plain package name, most likely) is kept as-is.
-      keep_expanded=""
-      for k in "''${keep_list[@]}"; do
-        grp=$(pacman -Sqg "$k" 2>/dev/null || true)
-        if [ -n "$grp" ]; then
-          keep_expanded="$keep_expanded
-$grp"
-        else
-          keep_expanded="$keep_expanded
-$k"
-        fi
-      done
-
-      declared=$(printf '%s\n' "''${pacman_pkgs[@]}" "''${aur_pkgs[@]}" "$keep_expanded" | LC_ALL=C sort -u)
+      declared=$(printf '%s\n' "''${pacman_pkgs[@]}" "''${aur_pkgs[@]}" "$(expand_keep)" | LC_ALL=C sort -u)
       remove=$(comm -23 <(printf '%s\n' "$installed") <(printf '%s\n' "$declared") | sed '/^$/d')
 
       if [ -z "$remove" ]; then
@@ -169,6 +187,59 @@ $k"
         echo "nixarch-packages: pruneUndeclared removing -> ''${remove_arr[*]}"
         pacman -Rns --noconfirm "''${remove_arr[@]}"
       fi
+    ''}
+
+    # --- 4. prune orphans (opt-in, dangerous, SEPARATE from step 3) ----------
+    # `pacman -Qdtq`: installed as a DEPENDENCY, required by nothing installed. Structurally
+    # invisible to step 3 above (which only ever looks at `-Qqe`, explicit installs), and not
+    # fixed by declaring the package in `pacman` either — see the module header for why
+    # `--needed` can leave a genuinely-declared package's install reason stuck on "dependency"
+    # forever. This is the dedicated sweep for that case.
+    #
+    # Runs AFTER step 3 on purpose: pruning an undeclared explicit package can itself strand
+    # its own dependencies as fresh orphans in the same activation, and a single reconcile
+    # should converge as far as it can in one run rather than needing two activations to settle.
+    #
+    # ITERATES TO A FIXED POINT rather than a single `pacman -Rns $(pacman -Qdtq)` pass. One
+    # pacman invocation with `-s` already closes the dependency graph *reachable from the
+    # targets you hand it* — passing this round's full orphan list gets you that closure in one
+    # transaction. But that is not the same guarantee as "no orphans remain": pacman's orphan
+    # accounting can shift on axes a single recursive removal does not chase (a virtual package
+    # a removed orphan alone satisfied, a group membership, a DB inconsistency from an earlier
+    # partial upgrade) — which is exactly why the standard Arch community idiom for this exact
+    # command is "run it again until nothing is left" rather than trusting one pass. Iterating
+    # is the more thorough answer; it is also the more dangerous one, which is why every round
+    # re-applies the full `keep`/`effectiveKeep` floor (nothing gets a free pass just because it
+    # showed up two rounds in) and the loop is hard-capped rather than open-ended: a keep-list
+    # that is wrong should fail fast and loud on round one, not get more of the box removed out
+    # from under it round after round until someone happens to look at the log.
+    ${lib.optionalString cfg.pruneOrphans ''
+      orphan_round=0
+      while :; do
+        orphan_round=$((orphan_round + 1))
+        if [ "$orphan_round" -gt ${toString cfg.orphanSweepMaxRounds} ]; then
+          echo "nixarch-packages: pruneOrphans — hit the ${toString cfg.orphanSweepMaxRounds}-round safety cap without converging (pacman -Qdtq still non-empty after filtering \`keep\`). Stopping rather than looping forever -- investigate by hand." >&2
+          break
+        fi
+
+        orphans=$(pacman -Qdtq 2>/dev/null | LC_ALL=C sort -u || true)
+        if [ -z "$orphans" ]; then
+          echo "nixarch-packages: pruneOrphans — round $orphan_round: pacman -Qdtq is empty, converged"
+          break
+        fi
+
+        keep_expanded=$(expand_keep | LC_ALL=C sort -u)
+        to_remove=$(comm -23 <(printf '%s\n' "$orphans") <(printf '%s\n' "$keep_expanded") | sed '/^$/d')
+
+        if [ -z "$to_remove" ]; then
+          echo "nixarch-packages: pruneOrphans — round $orphan_round: remaining orphans are all keep-listed, converged"
+          break
+        fi
+
+        mapfile -t remove_arr <<< "$to_remove"
+        echo "nixarch-packages: pruneOrphans — round $orphan_round removing -> ''${remove_arr[*]}"
+        pacman -Rns --noconfirm "''${remove_arr[@]}"
+      done
     ''}
   '';
 in
@@ -257,6 +328,39 @@ in
       '';
     };
 
+    pruneOrphans = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        DANGEROUS, and SEPARATE from `pruneUndeclared`: also REMOVE genuine pacman orphans —
+        `pacman -Qdtq`, packages installed as a DEPENDENCY and now required by nothing — via
+        `pacman -Rns`, filtered through the same `keep`/`effectiveKeep` floor. Off by default,
+        for the same reason `pruneUndeclared` is.
+
+        `pruneUndeclared` cannot substitute for this: it diffs against `pacman -Qqe` (explicit
+        installs only), so a dependency-reason orphan is invisible to it no matter how that
+        option is set. See the module header for the full reasoning, including why simply
+        naming a package in `pacman` does not reliably fix its install reason either.
+
+        Iterates to a fixed point, capped at `orphanSweepMaxRounds` — see that option and the
+        `reconcile` script's own comment for why a single pass is not trusted to be enough.
+      '';
+    };
+
+    orphanSweepMaxRounds = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 5;
+      description = ''
+        Safety cap on `pruneOrphans`'s convergence loop. Each round re-queries
+        `pacman -Qdtq`, filters it through `keep`/`effectiveKeep`, and removes what is left;
+        the loop stops as soon as a round removes nothing. Ordinary convergence takes one or
+        two rounds. Hitting the cap means `pacman -Qdtq` is still non-empty after
+        `orphanSweepMaxRounds` rounds of real removals — logged loudly and left for a human,
+        rather than continuing to remove packages indefinitely on a keep-list that may be
+        wrong.
+      '';
+    };
+
     distro = lib.mkOption {
       type = lib.types.enum (lib.attrNames distroCriticalKeep);
       default = "arch";
@@ -302,7 +406,7 @@ in
       default = [ "base" "base-devel" ];
       description = ''
         Package groups or exact names that are NEVER removed even when
-        `pruneUndeclared` is on — the safety floor. Entries are expanded as
+        `pruneUndeclared` or `pruneOrphans` is on — the safety floor. Entries are expanded as
         pacman groups first (`pacman -Sqg`); anything that isn't a known
         group is kept as a literal package name.
 
