@@ -121,6 +121,16 @@ let
     ++ distroCriticalKeep.${cfg.distro}
     ++ cfg.extraCriticalKeep;
 
+  # One package per DERIVATIVE (never "arch" itself -- see the runtime check below for why that
+  # direction can't be detected) whose mere presence is strong evidence the box actually runs
+  # that derivative, regardless of what `distro` is set to. `cachyos-keyring` is not something a
+  # plain Arch box acquires by accident -- getting it onto a box means the CachyOS repos are
+  # already configured, which for `criticalKeep`'s purposes IS the fact that matters, no matter
+  # what /etc/os-release (or a stale `distro` declaration) claims.
+  distroSignature = {
+    cachyos = "cachyos-keyring";
+  };
+
   reconcile = pkgs.writeShellScript "nixarch-packages-reconcile" ''
     set -eu
 
@@ -147,6 +157,33 @@ let
     # Empty-array expansion under `set -u` is safe on bash >= 4.4; every
     # Arch-family box this module targets is well past that.
     assume_args=(${lib.escapeShellArgs (lib.concatMap (p: [ "--assume-installed" p ]) cfg.assumeInstalled)})
+
+    # --- 0. distro mismatch detector (always runs -- NOT gated behind either prune flag) -----
+    # `distro` is DECLARED, never probed at eval time -- that option's own doc already explains
+    # why: this module is evaluated wherever the flake is built, not necessarily the machine it
+    # targets, so eval-time detection would as often as not read the WRONG host's identity. This
+    # is the runtime complement, and it has to be: it runs ON the real box, where the live pacman
+    # database is the actual box's, not eval's guess. A `distro` left at the wrong value costs a
+    # box its own keyring/mirrorlist protection under `criticalKeep` -- silently, until someone
+    # turns `pruneUndeclared`/`pruneOrphans` on and finds out the hard way. This check exists so
+    # that finding-out happens in a log line instead, and happens BEFORE either flag is ever
+    # turned on, which is why it is unconditional rather than folded into steps 3/4 below.
+    #
+    # Deliberately WARN, never fail the unit: one signature package being present is strong
+    # evidence, not proof, and "converge packages" should not stop because a heuristic fired.
+    #
+    # Only checks the DERIVATIVE direction (a box that is secretly cachyos but declares "arch"),
+    # never the reverse: "arch" is the fallback with an empty critical-keep list, so there is no
+    # signature package whose ABSENCE would mean anything -- a plain Arch box is what you get by
+    # not opting into a derivative, not a state with its own fingerprint to check for.
+    ${lib.concatStringsSep "\n" (lib.mapAttrsToList
+      (name: signaturePkg: ''
+        if [ ${lib.escapeShellArg cfg.distro} != ${lib.escapeShellArg name} ] \
+          && pacman -Qq ${lib.escapeShellArg signaturePkg} >/dev/null 2>&1; then
+          echo "nixarch-packages: WARNING ${lib.escapeShellArg signaturePkg} is installed but nixarch.packages.distro = ${lib.escapeShellArg cfg.distro}, not ${lib.escapeShellArg name} -- this host's ${lib.escapeShellArg name} keyring/mirrorlist floor is likely NOT protected by criticalKeep right now. Check nixarch.packages.distro." >&2
+        fi
+      '')
+      distroSignature)}
 
     # --- 1. official-repo packages -----------------------------------------
     if [ ''${#pacman_pkgs[@]} -gt 0 ]; then
