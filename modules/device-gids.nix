@@ -106,11 +106,20 @@ in
 
     deviceGids = lib.mkOption {
       type = lib.types.attrsOf lib.types.int;
-      # Defaults from nixiam's cross-host `posix.groups` table when that module has been
-      # composed into this configuration (read defensively; see the header block above for
-      # why this is a default and never an import). Set this explicitly to override it, carve
-      # your own numbering with no sibling module at all, or opt out with `{ }`.
-      default = nixiamGroups;
+      # The default is NOT `nixiamGroups` here -- see `config`, below, for why. A bare
+      # `default = nixiamGroups;` on this OPTION declaration would be a single implicit
+      # definition of the whole attrset at the module system's lowest priority: the instant a
+      # host wrote so much as `nixarch.deviceGids.render = 500;` to pin ONE group, that plain
+      # (unwrapped, normal-priority) definition would outrank and wholly REPLACE this default --
+      # not merge with it -- silently dropping every other nixiam-derived entry (`video`,
+      # `input`, ...) from the pinned/migrated set, with no error. `attrsOf` merges per-KEY only
+      # among definitions that survive the OPTION-level priority filter first; a lower-priority
+      # definition that loses that filter contributes nothing at all, regardless of which keys it
+      # was missing. Proved live with `nix-instantiate` against this exact shape before writing
+      # this comment -- this was not a hypothetical, see `nixaudio.fabric.peers` for a case where
+      # the equivalent gap actually shipped and one fleet host's audio peers silently collapsed to
+      # the one hand-written entry for weeks.
+      default = { };
       defaultText = lib.literalExpression "config.nixiam.posix.groups or { }";
       example = { render = 500; video = 501; };
       description = ''
@@ -123,7 +132,9 @@ in
         group registry) when that module is present, so a cross-host gid
         table only needs to be declared once, in nixiam, rather than restated
         per host here. Set this explicitly to pin a different map, or to
-        override any one entry the default supplies.
+        override any one entry the default supplies -- literally true now (see
+        `config`'s per-key `lib.mkDefault`, below): overriding `render` alone
+        leaves `video`/`input`/every other nixiam-derived entry intact.
       '';
     };
 
@@ -142,6 +153,19 @@ in
   };
 
   config = lib.mkMerge [
+    # Populates the default here, on the `config` side, per-key -- NOT as the option's own
+    # `default =` (see that option's own comment for why a bare option-level default of this
+    # shape is the exact bug this repo was asked to sweep for). `lib.mapAttrs` wraps EACH
+    # group's gid in its own `lib.mkDefault`, so each becomes its own independent, per-key
+    # definition of `deviceGids` rather than one definition covering the whole attrset: a host
+    # writing `nixarch.deviceGids.render = 500;` now only ever competes with (and wins against)
+    # THIS key's own `mkDefault`, leaving every other nixiam-derived entry untouched. Unconditional
+    # (not gated on `enabled`) to match the option's previous behavior -- `deviceGids` is DATA,
+    # resolved the same way regardless of whether the pin/migrate mechanism is switched on; the
+    # mechanism's own "complete no-op when disabled" promise is kept below, by gating the actual
+    # side effects (not this value) on `enabled`.
+    { nixarch.deviceGids = lib.mapAttrs (_: lib.mkDefault) nixiamGroups; }
+
     # The probe's warning is gated on `enabled` ALONE, deliberately never on `groupNames != [ ]`
     # too: state "absent" and state "unresolved" both resolve `nixiamGroups` to the SAME fallback
     # (`{ }`), so gating the warning on the resolved map being non-empty would hide it in exactly

@@ -336,6 +336,28 @@ let
   # header), exactly the host that has "never heard of nixiam" the header describes.
   gidsWithoutNixiamAtAll = evalDeviceGids { nixarch.deviceGidsEnable = true; };
 
+  # THE BUG THIS FIX CLOSES: nixiam derives TWO entries (render, tty); a host pins only ONE of
+  # them by hand -- the realistic case `gidsExplicitOverridesNixiam` above can't distinguish from
+  # a full replace, because its nixiam fixture only ever has the one key the host also names.
+  # Before this fix, `nixarch.deviceGids.render = 999;` sat at normal priority for the WHOLE
+  # option (a bare `default = nixiamGroups;`) and wholly replaced the nixiam-derived default --
+  # `tty` would have silently vanished, taking the devpts lockstep with it, with no error. See
+  # the `deviceGids` option's own comment for the mechanism, and `nixaudio.fabric.peers` for the
+  # live incident that first exposed it fleet-wide.
+  gidsPartialOverrideKeepsSiblings = (lib.evalModules {
+    modules = [
+      systemManagerSurfaceStub
+      { _module.args.pkgs = pkgs; }
+      nixiamDeviceGroupsStub
+      deviceGidsModule
+      {
+        nixarch.deviceGidsEnable = true;
+        nixiam.posix.deviceGroups = { render = 400; tty = 403; };
+        nixarch.deviceGids.render = 999;
+      }
+    ];
+  }).config;
+
   deviceGidsChecks = [
     (check "device-gids/gid-map-renders-render"
       ((unwrap (gidsRendered.users.groups.render.gid or null)) == 501)
@@ -410,6 +432,14 @@ let
     (check "device-gids/disabled-with-populated-map-is-inert"
       (gidsDisabledWithMap.users.groups == { } && gidsDisabledWithMap.systemd.services == { })
       "users.groups: ${builtins.toJSON gidsDisabledWithMap.users.groups}, systemd.services: ${builtins.toJSON (builtins.attrNames gidsDisabledWithMap.systemd.services)}")
+
+    (check "device-gids/partial-override-keeps-untouched-nixiam-siblings"
+      (gidsPartialOverrideKeepsSiblings.nixarch.deviceGids == { render = 999; tty = 403; })
+      "got: ${builtins.toJSON gidsPartialOverrideKeepsSiblings.nixarch.deviceGids}")
+
+    (check "device-gids/partial-override-keeps-devpts-lockstep-from-untouched-tty"
+      (gidsPartialOverrideKeepsSiblings.systemd.services ? "devpts-gid")
+      "systemd.services keys: ${builtins.toJSON (builtins.attrNames gidsPartialOverrideKeepsSiblings.systemd.services)}")
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
