@@ -57,6 +57,13 @@
         # as-is — no NixOS-specific fork needed.
         gshadow-sync = ./modules/gshadow-sync.nix;
 
+        # Same reasoning as the systemManagerModules entry above: pin+migrate
+        # (users.groups + groupmod) and the devpts remount are plain module-
+        # system options NixOS realises identically to system-manager — no
+        # NixOS-specific fork needed. `probeFact` closed over here too, same
+        # as the systemManagerModules entry.
+        device-gids = import ./modules/device-gids.nix { inherit (nixhost.lib) probeFact; };
+
         # Only entry in this class, so it is trivially the default.
         default = self.nixosModules.gshadow-sync;
       };
