@@ -31,6 +31,13 @@ worth knowing if you add a check: because the stub is opaque (not a submodule), 
 `lib.mkForce` — `environment.PATH`, most notably — comes back through `config` still wrapped.
 `unwrap` undoes that.
 
+`home/desktop.nix` gets the mirror treatment (`homeManagerSurfaceStub`): home-manager's surface,
+as far as anything in this pairing touches it, is `systemd.user.services` plus assertions. What is
+*not* stubbed there is nixdesktop's own `home/session.nix` — that one is imported for real,
+because every property worth asserting about the user layer (which unit gets rendered, with which
+process shape) is produced by **its** provider dispatch from the values `home/desktop.nix` hands
+it. Stubbing it would only prove that this module writes the options it writes.
+
 ## Coverage
 
 - **`packages`** — declared `pacman`/`aur` lists round-trip through the option surface, including
@@ -54,7 +61,19 @@ worth knowing if you add a check: because the stub is opaque (not a submodule), 
   an explicit opt-in, so the "never by default" assertion isn't vacuously true. Also checks that
   the system layer (package) and user layer (`home/desktop.nix`'s spawn command) agree on the
   same binary, since `lib/desktop-roles.nix` is the only thing keeping those two from drifting
-  apart.
+  apart. The three opt-in capability roles (`fileManagerExtras`, `gvfsBackends`, `theming`) get
+  the same off-by-default-plus-positive-control pair, and the theming one additionally pins the
+  **Arch** spellings — `adw-gtk-theme`, not nixpkgs' `adw-gtk3` — because one unknown target
+  aborts the entire pacman transaction, so a name copied across from the NixOS table would take
+  the whole desktop down rather than just itself.
+- **`home-desktop`** — the user layer's provider dispatch. `gnome-keyring` renders a keyring unit
+  with the table's own command; `oo7` renders **none**, because the pacman `oo7` package already
+  ships a `--user` unit bound to `default.target` (reached before any compositor pulls in
+  `graphical-session.target`), so a second one loses the `org.freedesktop.secrets` name race every
+  time and sits permanently failed. Separate checks pin that oo7 nevertheless remains the
+  *selected* provider — the state that keeps its credential-based unlock reachable — and that it
+  never travels through nixdesktop's generic `command` escape hatch, which would render that
+  duplicate unit *and* give a `Type=simple` daemon gnome-keyring's `forking` shape.
 - **`gcroot-guard`** — the check unit's PATH actually reaches `nix-store` (without it the check
   can't even run — the same PATH gap the module exists to catch); `failLoudly` flips the
   `ExecStart` `"-"` prefix; disabled ships no unit and no `nixarch-register` wrapper.
@@ -66,21 +85,21 @@ shape — `foreign-service.nix` in particular has a subtle `restartTriggers` cro
 
 ## Running
 
-Needs a `nixdesktop` checkout for the `desktop-backend` section — defaults to a sibling clone
-(`../../nixdesktop`, i.e. `github/nixdesktop` next to `github/nixarch`), which is how these two
-repos are normally worked on together. Override with `--arg nixdesktop <path>` if yours lives
-elsewhere.
+Needs a `nixdesktop` checkout for the `desktop-backend` and `home-desktop` sections — defaults to
+a sibling clone (`../../nixdesktop`, i.e. `github/nixdesktop` next to `github/nixarch`), which is
+how these two repos are normally worked on together. Override with `--arg nixdesktop <path>` if
+yours lives elsewhere.
 
 ```console
 $ nix-instantiate --eval --strict -A eval-checks.passedCount checks
-"43"
+"78"
 ```
 
 A failing check throws before that derivation attribute even exists, with every failing check's
 name and a `got: ...` detail — not just the first one:
 
 ```
-error: nixarch eval-checks FAILED (1/43):
+error: nixarch eval-checks FAILED (1/78):
   - packages/prune-undeclared-defaults-off: got: true
 ```
 

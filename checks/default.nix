@@ -547,6 +547,31 @@ let
     nixdesktop.desktop.enable = false;
   };
 
+  # The three capability booleans nixdesktop ships at `default = false`. Turned on together
+  # because they are independent of each other and of everything above -- what is under test is
+  # that `packagesFor`'s generic capability loop picks up a key purely by NAME MATCH with a `want`
+  # boolean, which is the property that lets nixdesktop add a role without this repo changing
+  # anything but the table.
+  desktopExtrasOptIn = evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = {
+      enable = true;
+      compositor = "niri";
+      fileManagerExtras = true;
+      gvfsBackends = true;
+      theming = true;
+    };
+  };
+  pacmanExtrasOptIn = desktopExtrasOptIn.nixarch.packages.pacman;
+
+  desktopOo7 = evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; keyring = "oo7"; };
+  };
+  pacmanOo7 = desktopOo7.nixarch.packages.pacman;
+
   # Gated on a nixdesktop checkout being reachable. nixarch deliberately does NOT take nixdesktop
   # as a flake input -- the family contract's R4 is that modules couple by option value, never by
   # dependency edge, and this backend reads `nixdesktop.want` precisely so no edge is needed. That
@@ -601,6 +626,173 @@ let
     (check "desktop-backend/disabled-nixdesktop-profile-is-inert"
       (desktopProfileDisabled.nixarch.packages.pacman == [ ])
       "got: ${builtins.toJSON desktopProfileDisabled.nixarch.packages.pacman}")
+
+    # ── the three opt-in capability roles ────────────────────────────────────────────────────
+    #
+    # OFF BY DEFAULT IS THE CONTRACT, not an accident of the current table. All three install
+    # taste-level software a consumer may well want to own outright (a theme especially), so an
+    # unopinionated `nixdesktop.desktop.enable = true` must never drag them in. This is the
+    # `no-kde-packages-by-default` property one role over, for roles that are booleans instead of
+    # named choices.
+    (check "desktop-backend/capability-extras-absent-by-default"
+      (!(lib.elem "thunar-archive-plugin" pacmanDefault) && !(lib.elem "ffmpegthumbnailer" pacmanDefault)
+        && !(lib.elem "gvfs-smb" pacmanDefault) && !(lib.elem "gvfs-mtp" pacmanDefault)
+        && !(lib.elem "nwg-look" pacmanDefault) && !(lib.elem "adw-gtk-theme" pacmanDefault))
+      "pacman: ${builtins.toJSON pacmanDefault}")
+
+    (check "desktop-backend/file-manager-extras-resolved-on-opt-in"
+      (builtins.all (p: lib.elem p pacmanExtrasOptIn)
+        [ "ffmpegthumbnailer" "thunar-archive-plugin" "xarchiver"
+          "thunar-media-tags-plugin" "thunar-vcs-plugin" ])
+      "pacman: ${builtins.toJSON pacmanExtrasOptIn}")
+
+    # The four names nixpkgs has no equivalent for at all -- nixdesktop's own table keeps this key
+    # empty because one monolithic gvfs already carries every one of these backends. This is the
+    # per-platform catalogue earning its keep, so it gets its own assertion rather than riding
+    # along in the one above.
+    (check "desktop-backend/gvfs-backends-resolved-on-opt-in"
+      (builtins.all (p: lib.elem p pacmanExtrasOptIn)
+        [ "gvfs-smb" "gvfs-nfs" "gvfs-mtp" "gvfs-gphoto2" ])
+      "pacman: ${builtins.toJSON pacmanExtrasOptIn}")
+
+    # ARCH NAMES, not nixpkgs ones: `adw-gtk-theme` here is `adw-gtk3` in nixpkgs, and `qt6ct`
+    # here is `qt6Packages.qt6ct` there. Copying either spelling across would produce a package
+    # `pacman -S` cannot find, which fails the WHOLE transaction (see `aurOnly`'s own comment) --
+    # so pinning the Arch spelling is pinning that the two tables stayed genuinely separate.
+    (check "desktop-backend/theming-resolved-on-opt-in-with-arch-names"
+      (builtins.all (p: lib.elem p pacmanExtrasOptIn) [ "nwg-look" "adw-gtk-theme" "qt6ct" ]
+        && !(lib.elem "adw-gtk3" pacmanExtrasOptIn))
+      "pacman: ${builtins.toJSON pacmanExtrasOptIn}")
+
+    # Every capability name must be a repo package, since one unknown target aborts the whole
+    # pacman transaction and takes the rest of the desktop with it. The partition is what stops
+    # that, so it has to be right about these too: nothing new here belongs in `aurOnly`.
+    (check "desktop-backend/capability-extras-are-repo-packages-not-aur"
+      (desktopExtrasOptIn.nixarch.packages.aur == [ ])
+      "aur: ${builtins.toJSON desktopExtrasOptIn.nixarch.packages.aur}")
+
+    # ── oo7 ──────────────────────────────────────────────────────────────────────────────────
+    #
+    # nixdesktop's `keyring` option accepts "oo7"; without a table entry that resolved through
+    # `resolve`'s fallthrough instead -- which on Arch would have happened to land on the right
+    # package name by luck, while leaving `home/desktop.nix` unable to select it at all (its enum
+    # is `lib.attrNames roles.keyrings`) and with no daemon path anywhere. The entry makes both
+    # deliberate.
+    (check "desktop-backend/oo7-keyring-role-resolved"
+      (lib.elem "oo7" pacmanOo7 && !(lib.elem "gnome-keyring" pacmanOo7))
+      "pacman: ${builtins.toJSON pacmanOo7}")
+
+    (check "desktop-backend/oo7-is-a-real-table-entry-not-a-fallthrough"
+      (roles.keyrings ? oo7 && roles.keyrings.oo7.packages == [ "oo7" ])
+      "keyrings keys: ${builtins.toJSON (builtins.attrNames roles.keyrings)}")
+
+    # The daemon is at `/usr/lib/oo7-daemon`, NOT `/usr/bin` -- so unlike gnome-keyring-daemon and
+    # kwalletd6 a bare name would resolve nowhere. Pinned as an absolute path for the same reason
+    # the mate-polkit check above pins its `/usr/lib/` prefix.
+    (check "desktop-backend/oo7-command-is-an-absolute-libexec-path"
+      (lib.hasPrefix "/usr/lib/" roles.keyrings.oo7.command)
+      "command: ${roles.keyrings.oo7.command}")
+
+    # home/desktop.nix derives its `keyring` enum from this table, so a missing entry is a hard
+    # eval error for a consumer rather than a silent fallthrough. This is the check that the two
+    # layers offer the same set of providers.
+    (check "desktop-backend/user-layer-can-select-every-keyring-role"
+      (builtins.all (k: roles.keyrings ? ${k}) [ "gnome-keyring" "kwallet" "oo7" ])
+      "keyrings keys: ${builtins.toJSON (builtins.attrNames roles.keyrings)}")
+  ];
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # home-desktop (home/desktop.nix) -- the USER-layer half of the same backend, gated on the same
+  # nixdesktop checkout as desktop-backend above.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  # Stub of the surface home-manager provides, the mirror of `systemManagerSurfaceStub` above and
+  # opaque for the same reason. nixdesktop's home/session.nix takes only `{ lib, config, ... }` and
+  # writes only `systemd.user.services` (plus assertions/warnings), so this is the whole surface --
+  # no `pkgs`, no `home.*`.
+  homeManagerSurfaceStub = { lib, ... }: {
+    options = {
+      systemd.user.services = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+      assertions = lib.mkOption { type = lib.types.listOf lib.types.attrs; default = [ ]; };
+      warnings = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+    };
+  };
+
+  # THE REAL nixdesktop home/session.nix, not a stub of it -- everything worth asserting here is
+  # produced by ITS provider dispatch (which unit gets rendered, with which process shape) from
+  # the values home/desktop.nix hands it. A stub would only prove this module writes the options
+  # it writes, which is not the question.
+  evalHomeDesktop = extraConfig: (lib.evalModules {
+    modules = [
+      homeManagerSurfaceStub
+      (nixdesktop + "/home/session.nix")
+      ../home/desktop.nix
+      extraConfig
+    ];
+  }).config;
+
+  homeGnomeKeyring = evalHomeDesktop {
+    nixdesktop.session.enable = true;
+    nixarch.home.desktop = { enable = true; polkitAgent = "mate-polkit"; keyring = "gnome-keyring"; };
+  };
+
+  homeOo7 = evalHomeDesktop {
+    nixdesktop.session.enable = true;
+    nixarch.home.desktop = { enable = true; polkitAgent = "mate-polkit"; keyring = "oo7"; };
+  };
+
+  failedAssertions = c: map (a: a.message) (lib.filter (a: !a.assertion) c.assertions);
+
+  homeDesktopChecks = if nixdesktop == null then [ ] else [
+    (check "home-desktop/gnome-keyring-renders-a-daemon-unit"
+      (homeGnomeKeyring.systemd.user.services ? "keyring"
+        && homeGnomeKeyring.nixdesktop.session.keyring.command == roles.keyrings.gnome-keyring.command)
+      "units: ${builtins.toJSON (builtins.attrNames homeGnomeKeyring.systemd.user.services)}, command: ${builtins.toJSON homeGnomeKeyring.nixdesktop.session.keyring.command}")
+
+    (check "home-desktop/polkit-agent-renders-a-unit"
+      (homeGnomeKeyring.systemd.user.services ? "polkit-agent")
+      "units: ${builtins.toJSON (builtins.attrNames homeGnomeKeyring.systemd.user.services)}")
+
+    # THE oo7 PROPERTY, and the reason this section exists at all. The pacman `oo7` package ships
+    # its own `--user` unit at `WantedBy=default.target`, which a user manager reaches strictly
+    # before any compositor pulls in `graphical-session.target` -- so anything rendered here would
+    # lose the `org.freedesktop.secrets` RequestName race every time and sit permanently failed.
+    # Selecting oo7 must therefore render NO keyring unit, while still leaving oo7 the active,
+    # configurable provider (the assertion below).
+    (check "home-desktop/oo7-renders-no-duplicate-daemon-unit"
+      (!(homeOo7.systemd.user.services ? "keyring")
+        && homeOo7.systemd.user.services ? "polkit-agent")
+      "units: ${builtins.toJSON (builtins.attrNames homeOo7.systemd.user.services)}")
+
+    # Not the same claim as "no unit": nixdesktop distinguishes "oo7 is the provider, rendered
+    # elsewhere" (`oo7.enable` + `renderDaemon = false`) from "nobody chose a provider", and only
+    # the first keeps `credential.*` -- the credential-based unlock oo7 is chosen FOR -- reachable.
+    (check "home-desktop/oo7-is-still-the-selected-provider"
+      (homeOo7.nixdesktop.session.keyring.enable
+        && homeOo7.nixdesktop.session.keyring.oo7.enable
+        && !homeOo7.nixdesktop.session.keyring.oo7.renderDaemon)
+      "keyring.enable: ${builtins.toJSON homeOo7.nixdesktop.session.keyring.enable}, oo7.enable: ${builtins.toJSON homeOo7.nixdesktop.session.keyring.oo7.enable}, renderDaemon: ${builtins.toJSON homeOo7.nixdesktop.session.keyring.oo7.renderDaemon}")
+
+    # NEVER through the generic `command` escape hatch, which would be wrong twice: it renders the
+    # duplicate unit above, AND nixdesktop derives serviceType/restart from which PROVIDER is
+    # enabled rather than from the string -- with only `command` set, oo7-daemon would get
+    # gnome-keyring's `Type=forking` and hang until TimeoutStartSec waiting for a fork that a
+    # `Type=simple` daemon never performs.
+    (check "home-desktop/oo7-does-not-use-the-generic-command-escape-hatch"
+      (homeOo7.nixdesktop.session.keyring.command == null)
+      "command: ${builtins.toJSON homeOo7.nixdesktop.session.keyring.command}")
+
+    # `keyring.oo7.command` is MANDATORY with no default in nixdesktop, so any wiring that touches
+    # it while `renderDaemon = false` throws "used but not defined" -- a failure that would surface
+    # as an unlabelled evaluation error in a consumer's config, not here. Forcing the assertion
+    # list is what proves nothing on this path reaches it.
+    (check "home-desktop/oo7-selection-raises-no-assertions"
+      (failedAssertions homeOo7 == [ ])
+      "failed assertions: ${builtins.toJSON (failedAssertions homeOo7)}")
+
+    (check "home-desktop/gnome-keyring-selection-raises-no-assertions"
+      (failedAssertions homeGnomeKeyring == [ ])
+      "failed assertions: ${builtins.toJSON (failedAssertions homeGnomeKeyring)}")
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -656,7 +848,8 @@ let
       "environment.systemPackages: ${builtins.toJSON gcrootLoud.environment.systemPackages}")
   ];
 
-  results = packagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks ++ desktopBackendChecks ++ gcrootGuardChecks;
+  results = packagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks ++ desktopBackendChecks
+    ++ homeDesktopChecks ++ gcrootGuardChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 
@@ -680,7 +873,7 @@ else {
       # whole file exists to prevent, and it already happened once -- these assertions sat
       # unreachable from any flake output and reported success without running.
       skipped = if nixdesktop == null
-        then "desktop-backend (no nixdesktop checkout; run standalone for those)"
+        then "desktop-backend, home-desktop (no nixdesktop checkout; run standalone for those)"
         else "none";
     }
     ''

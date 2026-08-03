@@ -283,6 +283,35 @@ tables, which is why `fileManager`, `launcher` and `terminal` can be free-form:
 on Arch the role name is usually already the package name, so an unlisted choice
 still works without waiting on this table to grow.
 
+nixdesktop's three opt-in capability roles — `fileManagerExtras`, `gvfsBackends`
+and `theming`, all `false` by default — are where the two backends diverge most,
+and they are the clearest demonstration of why a per-platform catalogue beats a
+shared name list:
+
+- **`gvfsBackends` has no nixpkgs equivalent at all.** Arch splits SMB, NFS, MTP
+  and gphoto2 into four separate packages, each with its own `gvfsd-*` daemon and
+  `.mount` file, none of them pulled in by `gvfs` itself; without them `smb://`
+  and friends simply fail to resolve while the local disk browses fine. nixpkgs
+  builds one gvfs with all four compiled in, so the same role is a documented
+  no-op there. Four names here, zero there.
+- **`theming` is spelled differently.** `adw-gtk-theme` here is `adw-gtk3` in
+  nixpkgs (no `adw-gtk-theme` attribute exists); `qt6ct` here is
+  `qt6Packages.qt6ct` there. Only `nwg-look` is the same word on both.
+- **`fileManagerExtras` needs a package here that must *not* be added there, and
+  picks a different archiver.** Arch's `tumbler` ships the ffmpeg thumbnailer
+  plugin, but that `.so` has a `DT_NEEDED` on a library only the separate
+  `ffmpegthumbnailer` package provides — so without it video files silently never
+  get a thumbnail; nixpkgs takes it as a buildInput of tumbler, where a second
+  package would install nothing but noise. And `thunar-archive-plugin` dispatches
+  only to archivers with a `.tap` wrapper under the LIBEXECDIR compiled into it,
+  which here is a shared directory that `xarchiver`'s own tap lands in, and on
+  NixOS is the plugin's own store path — reachable only by the taps it bundles.
+
+Getting one of those names wrong is not a local failure: `pacman -S` aborts the
+entire transaction on a single unknown target, which is also why
+[`lib/desktop-roles.nix`](lib/desktop-roles.nix) partitions AUR names out before
+publishing anything.
+
 The user-layer companion, `homeManagerModules.desktop`, turns the same role
 names into the commands that spawn them, so absolute paths like
 `/usr/lib/mate-polkit/polkit-mate-authentication-agent-1` stay out of personal
@@ -309,6 +338,18 @@ installed and the binary that gets spawned cannot drift apart. The role is
 stated twice because system-manager and home-manager are separate evaluations
 with no shared config tree — an honest cost, and a much smaller one than
 duplicating a path.
+
+One role is not a spawn command on Arch at all: `keyring = "oo7"` installs the
+`extra/oo7` package, which ships its own user unit bound to `default.target` — a
+target the user manager reaches at startup, strictly before a compositor pulls in
+`graphical-session.target`. The vendor daemon therefore owns
+`org.freedesktop.secrets` before anything nixdesktop rendered could start, so a
+second unit loses the name race every time and sits permanently failed. The user
+layer routes that role through nixdesktop's own
+`session.keyring.oo7.renderDaemon = false` instead, which keeps oo7 the selected
+provider — its credential-based unlock stays configurable — while rendering no
+daemon of its own. Note also that Arch's `oo7` declares a hard `Conflicts With:
+gnome-keyring`, so swapping providers means removing the outgoing one first.
 
 ### Full example
 
