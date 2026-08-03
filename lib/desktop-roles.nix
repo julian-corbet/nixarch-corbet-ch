@@ -162,7 +162,43 @@ rec {
     fileManagerExtras = [
       "ffmpegthumbnailer"
       "thunar-archive-plugin"
-      "xarchiver"
+
+      # engrampa, and NOT xarchiver, even though xarchiver works perfectly well here. Arch's
+      # shared `/usr/lib/thunar-archive-plugin` means BOTH resolve on this platform, so the choice
+      # is free — and nixdesktop's NixOS table has no such freedom: thunar-archive-plugin resolves
+      # its `<desktop-id>.tap` under a LIBEXECDIR baked in at compile time, which on NixOS is the
+      # plugin's own store path, and the only wrappers it ships are ark/engrampa/file-roller.
+      # Picking the one name that works on both platforms costs nothing here and removes a
+      # divergence that would otherwise have to be remembered every time either side changed.
+      # Of the three, engrampa is GTK3 (ark drags KDE Frameworks, file-roller is GTK4+libadwaita),
+      # matching the same constraint that makes mate-polkit the polkit agent.
+      "engrampa"
+
+      # ── The format backends ─────────────────────────────────────────────────────────────────
+      #
+      # engrampa is a dispatcher: one `fr-command-*` module per format, each exec'ing an external
+      # command by bare name. Its own hard deps cover tar/gzip/zip/unzip only, so everything below
+      # is the difference between an archive manager that opens what people actually send you and
+      # one that handles three formats.
+      #
+      # `7zip`, not `p7zip`: Arch retired p7zip from its repos in favour of upstream's own package.
+      # engrampa's own optdepend metadata still says `p7zip` and is therefore unsatisfiable by
+      # name — following it literally installs nothing and silently leaves 7z broken. Both provide
+      # `/usr/bin/7z`, which is what the backend actually calls.
+      "7zip"
+
+      # RAR. Arch packages unrar without the licence question NixOS has to answer, so this side
+      # gets the real thing rather than the free reader nixdesktop's table uses.
+      "unrar"
+
+      "unace" # ACE — no nixpkgs equivalent, so Arch-only by package availability, not by choice
+      "lhasa" # lha/lzh
+      "lrzip"
+      "lzop"
+      "cpio" # cpio, and half of rpm
+      "rpm-tools" # rpm2cpio  (nixpkgs spells this one `rpm`)
+      "brotli"
+
       "thunar-media-tags-plugin"
       "thunar-vcs-plugin"
     ];
