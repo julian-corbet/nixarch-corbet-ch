@@ -207,7 +207,30 @@ let
       ''}
     fi
 
-    # --- 3. prune undeclared (opt-in, dangerous) ------------------------------
+    # --- 3. remove packages declared absent -----------------------------------
+    # Ordered BEFORE both prune steps deliberately: removing a named package releases the
+    # dependencies only it needed, and those become orphans within this same activation.
+    # Sweeping them here rather than a reconcile later means one run reaches the state the
+    # declaration describes, instead of converging over several.
+    #
+    # Each name is probed individually rather than in one `pacman -Qq a b c`: that form
+    # fails as a whole if ANY argument is not installed, which would make a single
+    # already-removed package hide every other one still present.
+    ${lib.optionalString (cfg.absent != [ ]) ''
+      absent_declared=(${lib.escapeShellArgs cfg.absent})
+      absent_present=()
+      for p in "''${absent_declared[@]}"; do
+        if pacman -Qq "$p" >/dev/null 2>&1; then absent_present+=("$p"); fi
+      done
+      if [ ''${#absent_present[@]} -eq 0 ]; then
+        echo "nixarch-packages: absent — nothing to remove (none of ''${#absent_declared[@]} declared packages are installed)"
+      else
+        echo "nixarch-packages: absent removing -> ''${absent_present[*]}"
+        pacman -Rns --noconfirm "''${absent_present[@]}"
+      fi
+    ''}
+
+    # --- 4. prune undeclared (opt-in, dangerous) ------------------------------
     # pacman has no notion of "installed before this declaration existed" — a
     # package you rely on but simply forgot to declare is indistinguishable,
     # from here, from genuine drift. Only enable this once `pacman` + `aur` +
@@ -226,7 +249,7 @@ let
       fi
     ''}
 
-    # --- 4. prune orphans (opt-in, dangerous, SEPARATE from step 3) ----------
+    # --- 5. prune orphans (opt-in, dangerous, SEPARATE from step 4) ----------
     # `pacman -Qdtq`: installed as a DEPENDENCY, required by nothing installed. Structurally
     # invisible to step 3 above (which only ever looks at `-Qqe`, explicit installs), and not
     # fixed by declaring the package in `pacman` either — see the module header for why
@@ -295,6 +318,40 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = "AUR packages to ensure installed, via an AUR helper (see `aurHelper`/`aurUser`).";
+    };
+
+    absent = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "partitionmanager" ];
+      description = ''
+        Packages that must NOT be installed on this host. Removed with `pacman -Rns` if
+        present; silently skipped if not.
+
+        This is the middle ground the two prune options leave out, and without it a host has
+        only two settings: declare everything, or declare nothing. `pruneUndeclared` is
+        unusable until `pacman` ∪ `aur` ∪ `keep` describes the WHOLE machine — on a box with
+        hundreds of hand-installed packages that day may never come, so it stays off, and
+        with it goes any declarative way to remove anything. `pruneOrphans` cannot help
+        either: it only ever considers packages installed as a DEPENDENCY, so something
+        explicitly installed is invisible to it no matter how long it has been unwanted.
+
+        A single explicitly-installed package you want gone therefore has no declarative
+        expression at all, and the only remaining move is `pacman -Rns` by hand. That leaves
+        no record of the decision anywhere, so the package comes back the next time anything
+        pulls it in, and the next person to look cannot tell whether it is absent on purpose
+        or absent by accident.
+
+        Unlike the prune options, this is safe to leave on. It removes only the names written
+        here — there is no set arithmetic that can widen it, no dependency on a keep-list
+        being complete, and no way for a forgotten declaration to turn into a removal. It is
+        still `-Rns`, so dependencies that nothing else needs go with the named package.
+
+        A name that appears here AND in `pacman`, `aur` or `keep` is a contradiction and is
+        rejected at evaluation time rather than resolved by ordering. Whichever way a silent
+        resolution went, one of the two declarations would be a lie, and the machine would
+        flip between states on every reconcile.
+      '';
     };
 
     assumeInstalled = lib.mkOption {
@@ -489,6 +546,27 @@ in
     { nixarch.packages.effectiveKeep = lib.unique (criticalKeep ++ cfg.keep); }
 
     (lib.mkIf cfg.enable {
+    # A package cannot be required and forbidden at once. Caught here rather than at reconcile
+    # time because the runtime resolution would depend on step ordering: install-then-remove and
+    # remove-then-install both "work", produce opposite machines, and neither is more correct
+    # than the other. The declaration is what is wrong, so this fails where the declaration is
+    # written -- not at 03:00 on the box.
+    assertions =
+      let
+        conflicting = lib.intersectLists cfg.absent
+          (cfg.pacman ++ cfg.aur ++ cfg.effectiveKeep);
+      in
+      [{
+        assertion = conflicting == [ ];
+        message = ''
+          nixarch.packages.absent lists ${lib.concatStringsSep ", " conflicting}, which ${
+            if lib.length conflicting == 1 then "is" else "are"
+          } also declared in `pacman`, `aur` or the `keep`/`effectiveKeep` floor. Remove the
+          name from one side: `absent` means the package must not be installed, and those
+          three mean it must be, so no reconcile can satisfy both.
+        '';
+      }];
+
     systemd.services.nixarch-packages-reconcile = {
       description = "nixarch: converge the installed Arch/AUR package set to the declared list";
       # multi-user.target (not sysinit) so system-manager (re)runs this on a live

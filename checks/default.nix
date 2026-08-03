@@ -128,7 +128,60 @@ let
     nixarch.packages = { enable = true; pruneOrphans = true; orphanSweepMaxRounds = 3; };
   };
 
+  # `absent` is the third package-set declaration, and the only one that removes without any
+  # prune toggle being on. Its whole safety argument is that it touches ONLY the names written
+  # down, so these checks prove both directions: a legitimate list evaluates clean, and every
+  # way of contradicting it is caught at eval rather than resolved by step ordering at runtime.
+  pkgsAbsent = evalPackages {
+    nixarch.packages = { enable = true; absent = [ "partitionmanager" ]; };
+  };
+  # Same name required AND forbidden -- unsatisfiable, must not evaluate clean.
+  pkgsAbsentVsPacman = evalPackages {
+    nixarch.packages = {
+      enable = true;
+      absent = [ "partitionmanager" ];
+      pacman = [ "partitionmanager" ];
+    };
+  };
+  pkgsAbsentVsAur = evalPackages {
+    nixarch.packages = { enable = true; absent = [ "some-aur-pkg" ]; aur = [ "some-aur-pkg" ]; };
+  };
+  # The critical floor is NON-overridable, so naming the package manager itself must be refused
+  # even though the user never mentioned `keep` -- this is the check that proves `absent` cannot
+  # be used to delete the tool the reconciler runs.
+  pkgsAbsentVsCriticalFloor = evalPackages {
+    nixarch.packages = { enable = true; absent = [ "pacman" ]; };
+  };
+
   packagesChecks = [
+    (check "packages/absent-defaults-empty"
+      (pkgsDefault.nixarch.packages.absent == [ ])
+      "got: ${builtins.toJSON pkgsDefault.nixarch.packages.absent}")
+
+    (check "packages/absent-round-trips"
+      (pkgsAbsent.nixarch.packages.absent == [ "partitionmanager" ])
+      "got: ${builtins.toJSON pkgsAbsent.nixarch.packages.absent}")
+
+    # The POSITIVE direction. Without this, the three conflict checks below would pass just as
+    # happily against a module that rejected everything.
+    (check "packages/absent-alone-evaluates-clean"
+      (failedAssertions pkgsAbsent == [ ])
+      "unexpected failing assertions: ${builtins.toJSON (failedAssertions pkgsAbsent)}")
+
+    (check "packages/absent-conflicting-with-pacman-is-rejected"
+      (failedAssertions pkgsAbsentVsPacman != [ ])
+      "expected a failing assertion for a package both required and forbidden, got none")
+
+    (check "packages/absent-conflicting-with-aur-is-rejected"
+      (failedAssertions pkgsAbsentVsAur != [ ])
+      "expected a failing assertion for an AUR package both required and forbidden, got none")
+
+    # The floor is union'd in regardless of `keep`, so this must fail without the test config
+    # mentioning `keep` at all.
+    (check "packages/absent-cannot-target-the-critical-floor"
+      (failedAssertions pkgsAbsentVsCriticalFloor != [ ])
+      "expected `absent = [ \"pacman\" ]` to be refused by the critical keep floor, got none")
+
     (check "packages/pacman-declared-round-trips"
       (pkgsDeclared.nixarch.packages.pacman == [ "git" "vim" ])
       "got: ${builtins.toJSON pkgsDeclared.nixarch.packages.pacman}")
