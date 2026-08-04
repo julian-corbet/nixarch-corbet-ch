@@ -198,12 +198,68 @@ let
     # entry is part of the same one-time manual bootstrap as the helper itself,
     # not something this module can set up (it would need to already run as
     # root-with-opinions about sudoers, which is out of scope here).
+    #
+    # ISOLATED PER PACKAGE ON BATCH FAILURE, not a bare command trusted to
+    # succeed. An AUR PKGBUILD can pin its checksums against a versioned vendor
+    # URL that the vendor rotates off its CDN on its own schedule (zoom's:
+    # `https://zoom.us/client/<ver>/zoom_x86_64.pkg.tar.xz`) — the package goes
+    # stale with zero action on this module's or this host's part, between one
+    # activation and the next. Official-repo packages in step 1 don't share
+    # this exposure (the repo IS the source, signed and mirrored by pacman
+    # itself), which is why only this step gets the isolation below.
+    #
+    # A bare `paru -S pkg1 .. pkgN` resolves and commits the whole batch as one
+    # transaction: one package's checksum failure fails the command, and under
+    # `set -eu` a failed command kills the script outright — taking every OTHER
+    # declared AUR package down with it, including ones with nothing to do with
+    # the one that actually failed (on a real host: `sway-scroll`, the
+    # compositor, and `evdi-dkms`, the DisplayLink kernel driver, both silently
+    # never installed because `zoom`, alphabetically last, 404'd first).
+    #
+    # So: try the batch, and ONLY on failure fall back to one invocation per
+    # package to find out which one(s) actually failed. `if cmd; then .. else
+    # .. fi` is what keeps this compatible with `set -e` — a bare failing
+    # command in that position kills the script the same as an unguarded one,
+    # but a command tested by `if`/`while` does not, by `set -e`'s own carve-out
+    # (POSIX 2.14.3 / bash's `set -e` manual: a command's failure is ignored
+    # when it is part of the test in an `if`, `while`, `until`, or a `&&`/`||`
+    # list — see the `assumeInstalled` doc above for the same bash-version-floor
+    # reasoning applied elsewhere in this script).
+    #
+    # COST: the happy path (nothing fails) still costs exactly the one `paru`
+    # invocation it always did — the fallback loop only runs at all once the
+    # batch has ALREADY failed. Paid only then: on a 16-package list, up to 15
+    # extra `paru` process starts (config load, sync-db read, an AUR RPC lookup
+    # per package instead of one batched lookup) versus the single batch
+    # attempt — real, but bounded, one-time-per-failed-activation, and every
+    # invocation for a package the batch already got installed is a fast
+    # `--needed` no-op rather than a rebuild. The alternative of always going
+    # one-by-one would pay a strict superset of this cost on EVERY run,
+    # including the common case where nothing is wrong; this only pays it when
+    # something already is.
     if [ ''${#aur_pkgs[@]} -gt 0 ]; then
       ${if cfg.aurUser == null then ''
         echo "nixarch-packages: WARNING nixarch.packages.aur is non-empty but nixarch.packages.aurUser is null — skipping AUR reconcile. Set aurUser to a non-root account with a bootstrapped AUR helper and passwordless sudo."
       '' else ''
         echo "nixarch-packages: ${lib.escapeShellArg cfg.aurHelper} -S --needed (as ${lib.escapeShellArg cfg.aurUser}) -> ''${aur_pkgs[*]}"
-        runuser -u ${lib.escapeShellArg cfg.aurUser} -- ${lib.escapeShellArg cfg.aurHelper} -S --needed --noconfirm "''${assume_args[@]}" "''${aur_pkgs[@]}"
+        if runuser -u ${lib.escapeShellArg cfg.aurUser} -- ${lib.escapeShellArg cfg.aurHelper} -S --needed --noconfirm "''${assume_args[@]}" "''${aur_pkgs[@]}"; then
+          echo "nixarch-packages: AUR batch install succeeded -> ''${aur_pkgs[*]}"
+        else
+          echo "nixarch-packages: WARNING AUR batch install failed -- falling back to one ${lib.escapeShellArg cfg.aurHelper} invocation per package to isolate which one(s) actually failed" >&2
+          failed_aur=()
+          for pkg in "''${aur_pkgs[@]}"; do
+            if runuser -u ${lib.escapeShellArg cfg.aurUser} -- ${lib.escapeShellArg cfg.aurHelper} -S --needed --noconfirm "''${assume_args[@]}" "$pkg"; then
+              echo "nixarch-packages: AUR package installed -> $pkg"
+            else
+              echo "nixarch-packages: WARNING AUR package FAILED -> $pkg" >&2
+              failed_aur+=("$pkg")
+            fi
+          done
+          if [ ''${#failed_aur[@]} -gt 0 ]; then
+            echo "nixarch-packages: AUR reconcile finished with FAILURES (isolated -- every other declared AUR package still converged) -> ''${failed_aur[*]}" >&2
+            reconcile_failed=1
+          fi
+        fi
       ''}
     fi
 
@@ -278,6 +334,27 @@ let
         pacman -Rns --noconfirm "''${remove_arr[@]}"
       done
     ''}
+
+    # --- 5. surface a partial AUR failure (step 2) as a failed unit ----------
+    # Step 2 above ISOLATES a failing AUR package so the rest of the declared
+    # set still converges — but isolating the failure must not also HIDE it.
+    # A reconcile that silently reports success while one package never
+    # installed is worse than no isolation at all: nothing short of reading
+    # the journal by hand would ever reveal that `zoom` is still missing. This
+    # runs LAST, after both prune steps, on purpose — pruning is independent
+    # of whether every AUR package installed (it diffs the DECLARED lists
+    # against what pacman thinks is installed, not against step 2's outcome)
+    # and a single reconcile should still converge everything it safely can in
+    # one run rather than stopping short over one unrelated package. Only once
+    # that is done does this exit non-zero, which is what actually makes the
+    # failure visible: `RemainAfterExit` on a oneshot means the unit's status
+    # reflects the LAST `ExecStart` exit code, so this is what turns "check
+    # `systemctl --failed`" (or anything watching systemd unit state) into a
+    # real signal instead of something only a full journal read would catch.
+    if [ "''${reconcile_failed:-0}" -eq 1 ]; then
+      echo "nixarch-packages: reconcile finished with package failures (see WARNING lines above) -- exiting non-zero so the unit shows failed rather than reporting a clean converge that didn't happen" >&2
+      exit 1
+    fi
   '';
 in
 {
@@ -485,8 +562,23 @@ in
     description = "The keep-set prune actually applies: `keep` plus the non-removable package-manager floor.";
   };
 
+  # Computed, read-only, same shape as `effectiveKeep` above and for the same reason: exposed
+  # because there is otherwise no way to inspect the generated reconcile script without building
+  # it. This is what lets checks/default.nix assert real, static properties of the actual script
+  # this module ships -- e.g. that an AUR batch failure falls back to per-package installs, and
+  # that a partial failure exits non-zero -- via `pkgs.writeShellScript`'s own `.text` passthru
+  # (the literal string handed to it, readable at eval time, no store realisation required). NOT a
+  # stable interface: nothing outside the check suite should depend on this option's presence or
+  # the script's exact shape, only on the module's declared config/systemd surface.
+  options.nixarch.packages.reconcileScript = lib.mkOption {
+    type = lib.types.package;
+    readOnly = true;
+    description = "The generated reconcile script (same derivation `ExecStart` runs). Exposed for checks/default.nix's static-text assertions; not a stable interface.";
+  };
+
   config = lib.mkMerge [
     { nixarch.packages.effectiveKeep = lib.unique (criticalKeep ++ cfg.keep); }
+    { nixarch.packages.reconcileScript = reconcile; }
 
     (lib.mkIf cfg.enable {
     systemd.services.nixarch-packages-reconcile = {

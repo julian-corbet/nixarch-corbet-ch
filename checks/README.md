@@ -45,7 +45,16 @@ it. Stubbing it would only prove that this module writes the options it writes.
   one safety property worth a dedicated check: it runs `pacman -Rns` on a real box, and pacman
   cannot distinguish "genuinely undeclared" from "declared by a list you forgot to write"); the
   reconcile unit exists only when enabled and carries the host-tools PATH override without which
-  `pacman`/`runuser` don't resolve at all.
+  `pacman`/`runuser` don't resolve at all. The AUR-isolation step (a batch `paru` failure falls
+  back to one invocation per package, so a single stale AUR checksum can't take the rest of the
+  declared set down with it) gets a static-text pass over the actual generated reconcile script,
+  via `pkgs.writeShellScript`'s own `.text` passthru — the module exposes the derivation itself as
+  `nixarch.packages.reconcileScript` for exactly this. That proves the SHAPE of the control flow
+  (batch attempt `if`-guarded not bare, a reachable per-package fallback loop, a tracked failure
+  turning into a non-zero exit) without building or running anything; it does not prove paru
+  itself behaves this way on a real box — see "Is/Isn't" above. That side was checked by hand:
+  render the script, run it under stubbed `pacman`/`paru`/`runuser` with one package made to fail,
+  confirm the others still install and the process exits non-zero.
 - **`device-gids`** — a gid map renders into `users.groups.<name>.gid`; the `tty` entry alone
   arms the devpts remount unit; an empty map, and a populated map with the module disabled, are
   both genuine no-ops (no unit, no group declarations).
@@ -92,14 +101,14 @@ yours lives elsewhere.
 
 ```console
 $ nix-instantiate --eval --strict -A eval-checks.passedCount checks
-"78"
+"85"
 ```
 
 A failing check throws before that derivation attribute even exists, with every failing check's
 name and a `got: ...` detail — not just the first one:
 
 ```
-error: nixarch eval-checks FAILED (1/78):
+error: nixarch eval-checks FAILED (1/85):
   - packages/prune-undeclared-defaults-off: got: true
 ```
 

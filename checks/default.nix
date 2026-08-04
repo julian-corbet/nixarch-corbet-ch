@@ -128,6 +128,30 @@ let
     nixarch.packages = { enable = true; pruneOrphans = true; orphanSweepMaxRounds = 3; };
   };
 
+  # AUR-isolation (step 2 of the reconcile script): a batch AUR failure must not silently drop
+  # every OTHER declared AUR package (the defect this step exists to prevent -- see
+  # modules/packages.nix's own header comment on this step for the zoom/sway-scroll/evdi-dkms
+  # case that motivated it). These read the STATIC TEXT of the actual generated reconcile script
+  # via `pkgs.writeShellScript`'s own `.text` passthru -- the literal string handed to it, which
+  # Nix can read at eval time with no build/store-realisation of the script itself. That proves
+  # the SHAPE of the control flow (the batch attempt is `if`-guarded rather than bare; a
+  # per-package fallback loop exists and is reachable; a partial failure is tracked into a
+  # non-zero exit) is really present in the module's own output, not a hand-copied duplicate of
+  # it living only in this test file. It does NOT prove paru/pacman actually behave this way when
+  # invoked on a live box -- that is a fact about a running system, out of reach for any amount of
+  # Nix evaluation; see checks/README.md's "Is/Isn't" section. That side was instead verified by
+  # rendering this exact script and running it under stubbed pacman/paru/runuser (one run with a
+  # bad package isolated and everything else still installing; one clean run proving the batch
+  # attempt alone still costs the one invocation it always did) -- a transcript, not something
+  # this suite can re-check on every `nix flake check` without a real Arch box to run pacman on.
+  pkgsAurWithUser = evalPackages {
+    nixarch.packages = { enable = true; aur = [ "yay" "zoom" ]; aurUser = "julian"; };
+  };
+  aurWithUserText = pkgsAurWithUser.nixarch.packages.reconcileScript.text;
+  # `aurUser` left at its null default: the whole fallback branch is compiled OUT, not merely
+  # unreachable -- `pkgsDeclared` already covers `aur = [ "yay" ]` with no `aurUser` set.
+  noAurUserText = pkgsDeclared.nixarch.packages.reconcileScript.text;
+
   packagesChecks = [
     (check "packages/pacman-declared-round-trips"
       (pkgsDeclared.nixarch.packages.pacman == [ "git" "vim" ])
@@ -263,6 +287,57 @@ let
     (check "packages/unit-path-forced-to-host-tools"
       ((unwrap (pkgsDeclared.systemd.services.nixarch-packages-reconcile.environment.PATH or null)) == hostPaths.hostPath)
       "got: ${builtins.toJSON (unwrap (pkgsDeclared.systemd.services.nixarch-packages-reconcile.environment.PATH or null))}")
+
+    # The happy-path cost claim: the FIRST AUR attempt is still one invocation over the whole
+    # declared list, exactly as before this step existed -- not a pre-emptive one-by-one loop
+    # that would pay the extra cost on every run instead of only a failed one.
+    (check "packages/aur-batch-attempt-covers-the-whole-list-in-one-call"
+      (lib.hasInfix ''-- paru -S --needed --noconfirm "''${assume_args[@]}" "''${aur_pkgs[@]}"'' aurWithUserText)
+      "reconcileScript.text did not contain the expected one-shot batch invocation")
+
+    # The batch attempt must be the CONDITION of an `if`, not a bare statement -- a bare failing
+    # command in this position is exactly what let `set -eu` kill the whole reconcile on one bad
+    # AUR package (see modules/packages.nix's header comment on this step).
+    (check "packages/aur-batch-attempt-is-if-guarded-not-bare"
+      (lib.hasInfix "if runuser -u julian -- paru -S --needed --noconfirm" aurWithUserText)
+      "reconcileScript.text did not contain an `if`-guarded runuser invocation")
+
+    # The fallback: on batch failure, isolate by trying each declared AUR package on its own.
+    (check "packages/aur-batch-failure-falls-back-per-package"
+      (lib.hasInfix "falling back to one" aurWithUserText
+        && lib.hasInfix "for pkg in" aurWithUserText)
+      "reconcileScript.text is missing the per-package fallback loop")
+
+    # Isolating the failure must not also HIDE it -- see this step's own header comment. Both the
+    # bookkeeping (which package(s) failed, collected rather than dropped) and the consequence (a
+    # non-zero exit, the only thing that makes systemd itself show the unit as failed) must
+    # survive in the generated script.
+    (check "packages/aur-partial-failure-is-tracked-and-reported"
+      (lib.hasInfix "failed_aur+=" aurWithUserText
+        && lib.hasInfix "reconcile_failed=1" aurWithUserText)
+      "reconcileScript.text does not collect failed AUR package names")
+
+    (check "packages/aur-partial-failure-exits-non-zero"
+      (lib.hasInfix ''reconcile_failed:-0'' aurWithUserText
+        && lib.hasInfix "exit 1" aurWithUserText)
+      "reconcileScript.text does not exit non-zero on a tracked AUR failure")
+
+    # `aurUser == null` compiles OUT the whole AUR branch (including the fallback added by this
+    # step) in favour of a loud skip warning -- not merely a fallback that never gets reached.
+    (check "packages/aur-fallback-absent-when-aur-user-unset"
+      (!(lib.hasInfix "falling back to one" noAurUserText)
+        && lib.hasInfix "aurUser is null" noAurUserText)
+      "reconcileScript.text (no aurUser) unexpectedly contains AUR-fallback logic")
+
+    # Scope check, not a regression net for step 1 itself: official-repo packages stay a bare,
+    # un-isolated single command, unlike AUR -- the repo IS the source, signed and mirrored by
+    # pacman, so it doesn't share AUR's exposure to a vendor rotating a pinned checksum URL out
+    # from under a stale PKGBUILD (see this step's header comment). If step 1 ever grows the same
+    # isolation, this check should change WITH it, deliberately, not by silent drift.
+    (check "packages/pacman-step-unchanged-bare-single-command"
+      (lib.hasInfix ''pacman -S --needed --noconfirm "''${assume_args[@]}" "''${pacman_pkgs[@]}"'' aurWithUserText
+        && !(lib.hasInfix ''if pacman -S --needed'' aurWithUserText))
+      "reconcileScript.text: step 1 (official-repo packages) no longer matches the expected bare, un-isolated shape")
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
