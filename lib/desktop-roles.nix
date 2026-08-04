@@ -243,6 +243,15 @@ rec {
   # silently do nothing.
   compositors.niri = [ "niri" "brightnessctl" "playerctl" ];
 
+  # `resolve`'s own fallthrough (see below: "on Arch the role name is usually already the package
+  # name") is wrong for scroll specifically — the repos carry no package literally named `scroll`
+  # at all, official or AUR (verified live, `pacman -Si scroll` / `-Ss scroll`, 2026-08-04). The
+  # real package is `sway-scroll` (a sway/wlroots fork, AUR-only, maintained by scroll's own
+  # upstream author) — without this entry, `resolve compositors "scroll"` fell through to
+  # `[ "scroll" ]`, and every reconcile run failed outright on "target not found: scroll" before
+  # ever reaching any other package, AUR or repo. Found live chasing an unrelated AUR install.
+  compositors.scroll = [ "sway-scroll" ];
+
   # ── Which of the names above are AUR-only ───────────────────────────────────────────────────
 
   # `pacman -S` aborts the ENTIRE transaction on one unknown target, so a single AUR name mixed
@@ -257,6 +266,8 @@ rec {
   aurOnly = [
     # In the AUR only; the repos carry no eww.
     "eww"
+    # In the AUR only; see the `compositors.scroll` entry above for the full account.
+    "sway-scroll"
   ];
 
   # Partition a resolved package list into what `pacman -S` can take and what needs an AUR helper.
