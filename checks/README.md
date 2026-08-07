@@ -55,6 +55,13 @@ it. Stubbing it would only prove that this module writes the options it writes.
   itself behaves this way on a real box — see "Is/Isn't" above. That side was checked by hand:
   render the script, run it under stubbed `pacman`/`paru`/`runuser` with one package made to fail,
   confirm the others still install and the process exits non-zero.
+- **`base-packages`** — `reflector`, `rebuild-detector`, `arch-install-scripts`, `base` and
+  `base-devel` land in `pacman` regardless of `nixarch.packages.distro` (the same answer on every
+  Arch-family host); `paru` is the one name that splits on it — `aur` on the default `"arch"`
+  floor (a plain Arch host has no repository that carries a prebuilt one), lifted to `pacman` only
+  on `distro = "cachyos"`, and never present in both lists at once on either setting. Also proves
+  the list concatenates with a consumer's own `pacman`/`aur` entries, the same property
+  `desktop-backend`/`shelly`/`logrotate` are each checked for.
 - **`device-gids`** — a gid map renders into `users.groups.<name>.gid`; the `tty` entry alone
   arms the devpts remount unit; an empty map, and a populated map with the module disabled, are
   both genuine no-ops (no unit, no group declarations).
@@ -119,7 +126,7 @@ yours lives elsewhere.
 
 ```console
 $ nix-instantiate --eval --strict -A eval-checks.passedCount checks
-"102"
+"107"
 ```
 
 A failing check throws before that derivation attribute even exists, with every failing check's

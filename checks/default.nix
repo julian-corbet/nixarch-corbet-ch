@@ -349,6 +349,63 @@ let
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # base-packages (modules/base-packages.nix) -- unconditional, no `enable` of its own (see the
+  # module's own header for why), so `../modules/packages.nix` is composed alongside it purely to
+  # supply the `nixarch.packages.distro` option `paru`'s placement reads -- not to enable the
+  # reconciler itself, which none of these checks need running.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  evalBasePackages = extraConfig: evalMod [ ../modules/base-packages.nix ../modules/packages.nix extraConfig ];
+
+  basePkgsArchDefault = evalBasePackages { }; # nixarch.packages.distro defaults to "arch"
+  basePkgsCachyos = evalBasePackages { nixarch.packages.distro = "cachyos"; };
+  basePkgsWithHostList = evalBasePackages {
+    nixarch.packages = { pacman = [ "git" ]; aur = [ "yay" ]; };
+  };
+
+  basePackagesChecks = [
+    # The four names that are the same answer on every Arch-family host -- always present,
+    # regardless of `distro`.
+    (check "base-packages/uniform-names-always-in-pacman"
+      (builtins.all (p: lib.elem p basePkgsArchDefault.nixarch.packages.pacman)
+        [ "reflector" "rebuild-detector" "arch-install-scripts" "base" "base-devel" ])
+      "pacman: ${builtins.toJSON basePkgsArchDefault.nixarch.packages.pacman}")
+
+    # THE property this module's `paru` split exists for: on the Arch floor (the default,
+    # per-module-header the safe direction because it cannot abort a pacman transaction), `paru`
+    # is AUR, not pacman -- a plain Arch host has no repository that carries a prebuilt one.
+    (check "base-packages/paru-is-aur-on-plain-arch-floor"
+      (lib.elem "paru" basePkgsArchDefault.nixarch.packages.aur
+        && !(lib.elem "paru" basePkgsArchDefault.nixarch.packages.pacman))
+      "pacman: ${builtins.toJSON basePkgsArchDefault.nixarch.packages.pacman}, aur: ${builtins.toJSON basePkgsArchDefault.nixarch.packages.aur}")
+
+    # The lift: on `distro = "cachyos"`, `paru` resolves in that derivative's own repository, so
+    # it moves to the plain pacman transaction and must NOT also linger in `aur` -- a name in
+    # both lists would mean the AUR helper tries to build the tool a repository already ships.
+    (check "base-packages/paru-lifts-to-pacman-on-cachyos"
+      (lib.elem "paru" basePkgsCachyos.nixarch.packages.pacman
+        && !(lib.elem "paru" basePkgsCachyos.nixarch.packages.aur))
+      "pacman: ${builtins.toJSON basePkgsCachyos.nixarch.packages.pacman}, aur: ${builtins.toJSON basePkgsCachyos.nixarch.packages.aur}")
+
+    # The uniform four stay in `pacman` on the cachyos floor too -- the split is scoped to `paru`
+    # alone, not a wholesale re-evaluation of the rest of this module's list.
+    (check "base-packages/uniform-names-unaffected-by-distro"
+      (builtins.all (p: lib.elem p basePkgsCachyos.nixarch.packages.pacman)
+        [ "reflector" "rebuild-detector" "arch-install-scripts" "base" "base-devel" ])
+      "pacman: ${builtins.toJSON basePkgsCachyos.nixarch.packages.pacman}")
+
+    # Concatenates with a consumer's own lists rather than replacing them -- the same property
+    # modules/desktop-backend.nix, modules/shelly.nix and modules/logrotate.nix all rely on for
+    # the identical plain-`listOf` reason.
+    (check "base-packages/concatenates-with-a-consumers-own-lists"
+      (lib.elem "base" basePkgsWithHostList.nixarch.packages.pacman
+        && lib.elem "git" basePkgsWithHostList.nixarch.packages.pacman
+        && lib.elem "paru" basePkgsWithHostList.nixarch.packages.aur
+        && lib.elem "yay" basePkgsWithHostList.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON basePkgsWithHostList.nixarch.packages.pacman}, aur: ${builtins.toJSON basePkgsWithHostList.nixarch.packages.aur}")
+  ];
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
   # device-gids (modules/device-gids.nix)
   # ═══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -1060,8 +1117,9 @@ let
       "got: ${builtins.toJSON (logrotateWithDropin.environment.etc."logrotate.d/corbet-app".replaceExisting or null)}")
   ];
 
-  results = packagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks ++ desktopBackendChecks
-    ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks ++ logrotateChecks;
+  results = packagesChecks ++ basePackagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks
+    ++ desktopBackendChecks ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks
+    ++ logrotateChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 
