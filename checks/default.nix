@@ -715,9 +715,14 @@ let
         && !(lib.elem "nwg-look" pacmanDefault) && !(lib.elem "adw-gtk-theme" pacmanDefault))
       "pacman: ${builtins.toJSON pacmanDefault}")
 
+    # `engrampa`, not `xarchiver`: the table moved to the one archiver that resolves on BOTH
+    # platforms (see lib/desktop-roles.nix's own paragraph on the LIBEXECDIR difference) and this
+    # expectation was never updated, so the check has been failing on a table that is correct.
+    # `libopenraw` is asserted for the same reason `ffmpegthumbnailer` is -- an optdepend Arch's
+    # tumbler will not pull for you.
     (check "desktop-backend/file-manager-extras-resolved-on-opt-in"
       (builtins.all (p: lib.elem p pacmanExtrasOptIn)
-        [ "ffmpegthumbnailer" "thunar-archive-plugin" "xarchiver"
+        [ "ffmpegthumbnailer" "libopenraw" "thunar-archive-plugin" "engrampa"
           "thunar-media-tags-plugin" "thunar-vcs-plugin" ])
       "pacman: ${builtins.toJSON pacmanExtrasOptIn}")
 
