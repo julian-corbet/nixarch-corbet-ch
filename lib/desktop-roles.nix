@@ -161,6 +161,15 @@ rec {
     # this table free of cross-role conditionals.
     fileManagerExtras = [
       "ffmpegthumbnailer"
+
+      # libopenraw, for exactly ffmpegthumbnailer's reason one file type over: it is what lets the
+      # thumbnailer read a RAW photo. Arch's tumbler names it an optdepend and nothing else pulls
+      # it (`Required By: None`, `Optional For: gdk-pixbuf2 tumbler`), so on this platform it is a
+      # real "you must ask for this". nixpkgs takes it as a buildInput of tumbler alongside
+      # ffmpegthumbnailer, so the NIXOS TABLE MUST NOT MIRROR IT either -- same conclusion, same
+      # evidence shape, one decision applied twice.
+      "libopenraw"
+
       "thunar-archive-plugin"
 
       # engrampa, and NOT xarchiver, even though xarchiver works perfectly well here. Arch's
