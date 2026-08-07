@@ -38,6 +38,11 @@
         # `{ config, lib, pkgs, ... }`; nothing about consuming it changes.
         device-gids = import ./modules/device-gids.nix { inherit (nixhost.lib) probeFact; };
         packages = ./modules/packages.nix;
+
+        # The pacman packages every nixarch host wants, unconditionally — no `enable` of its
+        # own, unlike shelly below; see modules/base-packages.nix for why.
+        base-packages = ./modules/base-packages.nix;
+
         foreign-service = ./modules/foreign-service.nix;
 
         # Detects the activated-but-never-registered generation -- the failure where `activate`
