@@ -33,11 +33,12 @@
     # only; it does not rebuild anything itself.
     "rebuild-detector"
 
-    # `arch-chroot`, `genfstab`, `pacstrap`. Verified installed today on the container host
-    # (corbet-archlxc) and ABSENT on the Elitebook laptop — so this is not currently a uniform
-    # fact about the fleet, only a uniform declaration. Its use is provisioning and disaster
-    # recovery (building/chrooting into a new or broken install), not daily operation, which is
-    # why a host going without it day-to-day was never a problem worth noticing before now.
+    # `arch-chroot`, `genfstab`, `pacstrap`. Reported installed today on the container host
+    # (corbet-archlxc); confirmed ABSENT here on the Elitebook laptop (`pacman -Qi
+    # arch-install-scripts` — not found). So this is not currently a uniform fact about the
+    # fleet, only a uniform declaration. Its use is provisioning and disaster recovery
+    # (building/chrooting into a new or broken install), not daily operation, which is why a
+    # host going without it day-to-day was never a problem worth noticing before now.
     "arch-install-scripts"
   ];
 }
