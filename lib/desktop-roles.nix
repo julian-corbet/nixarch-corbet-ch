@@ -123,6 +123,17 @@ rec {
     # gtk's does not, which is what screen sharing actually needs on wlroots-adjacent stacks.
     portals = [ "xdg-desktop-portal-gnome" "xdg-desktop-portal-gtk" ];
 
+    # The Arch half of nixdesktop's `browsers` capability. A fixed PAIR rather than a
+    # single-choice role like fileManager or polkitAgent: a desktop routinely wants both at once
+    # and neither substitutes for the other -- one is the daily driver, the other is what you open
+    # when a site only works in a Chromium engine.
+    #
+    # Both are official-repo (`pacman -Si`: `extra`, with a cachyos-extra-v3 overlay build), so
+    # neither belongs in the AUR partition. Note the NixOS side is `pkgs.chromium` and NOT
+    # `google-chrome` -- the former is the BSD-3-Clause build that needs no allowUnfree, and the
+    # two are different programs, not two names for one.
+    browsers = [ "firefox" "chromium" ];
+
     # ── fileManagerExtras ─────────────────────────────────────────────────────────────────────
     #
     # A flat name list, which is the whole Arch story for this role: a thunarx plugin here is an
