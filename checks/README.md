@@ -86,6 +86,10 @@ it. Stubbing it would only prove that this module writes the options it writes.
 - **`gcroot-guard`** — the check unit's PATH actually reaches `nix-store` (without it the check
   can't even run — the same PATH gap the module exists to catch); `failLoudly` flips the
   `ExecStart` `"-"` prefix; disabled ships no unit and no `nixarch-register` wrapper.
+- **`shelly`** — off by default and contributes nothing to `pacman` until enabled; enabling adds
+  exactly `"shelly"` to `pacman` and nothing to `aur` (it is the official CachyOS-repo package,
+  not an AUR one); concatenates with a consumer's own `pacman` list rather than replacing it, the
+  same property `desktop-backend` relies on.
 
 **Not covered yet:** `modules/foreign-service.nix` and the `ai-workstation` profile. Both are
 real, shipped modules; they just didn't make this first pass. Worth a follow-up in the same

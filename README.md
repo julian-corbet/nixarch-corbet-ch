@@ -53,7 +53,8 @@ a toy demo or marketing page. As of this writing:
     `gshadow-sync` (heals `/etc/gshadow` after `userborn` writes `/etc/group`),
     `foreign-service` (declarative config over pacman systemd units),
     `gcroot-guard` (catches the activated-but-unregistered generation),
-    and `desktop-backend` (resolves nixdesktop roles into Arch packages).
+    `desktop-backend` (resolves nixdesktop roles into Arch packages),
+    and `shelly` (nixarch's own opinionated package: a graphical pacman/AUR front-end).
   - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle),
     `dev` (git config and direnv/nix-direnv integration), and `desktop`
     (Arch spawn commands for nixdesktop's session components).
@@ -351,6 +352,36 @@ provider — its credential-based unlock stays configurable — while rendering 
 daemon of its own. Note also that Arch's `oo7` declares a hard `Conflicts With:
 gnome-keyring`, so swapping providers means removing the outgoing one first.
 
+### shelly
+
+Shelly, a graphical package manager — a GTK4 front-end for pacman and the AUR (search,
+install, remove, browse dependencies), sitting alongside the `pacman`/paru CLIs. Official
+CachyOS repo, not AUR.
+
+Unlike every other package that ends up in `nixarch.packages.pacman`/`.aur`, which arrives
+from a domain repo (nixgpu, nixdev, ...) publishing into that sink from outside, Shelly is a
+package nixarch itself owns — a tool for managing the Arch package set, which is nixarch's own
+subject matter. It is declared the same way `desktop-backend` is: a small module inside this
+repo that publishes into the sink from the inside.
+
+```nix
+{
+  imports = [
+    inputs.nixarch.systemManagerModules.packages
+    inputs.nixarch.systemManagerModules.shelly
+  ];
+
+  nixarch.packages.enable = true;
+  nixarch.shelly.enable = true;
+}
+```
+
+**Caution:** this is a second, imperative package manager on a host whose installed set
+`nixarch.packages` otherwise reconciles declaratively. Anything installed through Shelly's GUI
+is invisible to that declaration and will read as undeclared drift the moment
+`pruneUndeclared`/`pruneOrphans` is turned on — deliberate, not an oversight; the declared
+lists remain the source of truth for what a box is supposed to have.
+
 ### Full example
 
 See [`examples/system-manager.nix`](examples/system-manager.nix) for a minimal,
@@ -382,7 +413,7 @@ Arch/CachyOS machines.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service, gcroot-guard, desktop-backend), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
+| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service, gcroot-guard, desktop-backend, shelly), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
 | `lib/` | Pure data shared across module classes — `desktop-roles.nix` (Arch resolution tables for nixdesktop roles) and `host-path.nix` (the host PATH every unit driving pacman/nix needs). |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |

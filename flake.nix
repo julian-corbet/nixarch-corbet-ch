@@ -50,6 +50,10 @@
         # packages. Import alongside nixdesktop.systemManagerModules.desktop, which
         # declares the `nixdesktop.want` option this reads.
         desktop-backend = ./modules/desktop-backend.nix;
+
+        # Shelly, a graphical package manager (pacman/AUR GUI front-end) — nixarch's own
+        # opinionated package, not a domain repo's; see modules/shelly.nix for the mechanism.
+        shelly = ./modules/shelly.nix;
       };
       nixosModules = {
         # NixOS realises users with the same userborn as system-manager and

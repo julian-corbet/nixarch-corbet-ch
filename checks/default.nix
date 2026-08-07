@@ -923,8 +923,51 @@ let
       "environment.systemPackages: ${builtins.toJSON gcrootLoud.environment.systemPackages}")
   ];
 
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # shelly (modules/shelly.nix) -- nixarch's own opinionated package, declared from inside the
+  # sink rather than published into it from a domain repo's own module.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  evalShelly = extraConfig: evalMod [ ../modules/shelly.nix ../modules/packages.nix extraConfig ];
+
+  shellyDefault = evalShelly { };
+  shellyOn = evalShelly { nixarch.shelly.enable = true; };
+  # The same concatenation property modules/desktop-backend.nix relies on (and is checked for
+  # above) -- proven here for this module too rather than assumed from that one.
+  shellyWithHostList = evalMod [
+    ../modules/shelly.nix
+    ../modules/packages.nix
+    { nixarch.shelly.enable = true; nixarch.packages.pacman = [ "git" ]; }
+  ];
+
+  shellyChecks = [
+    (check "shelly/disabled-by-default"
+      (shellyDefault.nixarch.shelly.enable == false)
+      "got: ${builtins.toJSON shellyDefault.nixarch.shelly.enable}")
+
+    (check "shelly/disabled-contributes-nothing-to-pacman"
+      (shellyDefault.nixarch.packages.pacman == [ ])
+      "got: ${builtins.toJSON shellyDefault.nixarch.packages.pacman}")
+
+    (check "shelly/enable-adds-shelly-to-pacman"
+      (shellyOn.nixarch.packages.pacman == [ "shelly" ])
+      "got: ${builtins.toJSON shellyOn.nixarch.packages.pacman}")
+
+    # Shelly is the official CachyOS-repo package, not AUR -- a wrong split here would abort the
+    # whole pacman transaction on `pacman -S` (one unknown target fails the batch), same failure
+    # mode modules/desktop-backend.nix's own AUR split exists to avoid.
+    (check "shelly/enable-adds-nothing-to-aur"
+      (shellyOn.nixarch.packages.aur == [ ])
+      "got: ${builtins.toJSON shellyOn.nixarch.packages.aur}")
+
+    (check "shelly/concatenates-with-a-consumers-own-pacman-list"
+      (lib.elem "shelly" shellyWithHostList.nixarch.packages.pacman
+        && lib.elem "git" shellyWithHostList.nixarch.packages.pacman)
+      "got: ${builtins.toJSON shellyWithHostList.nixarch.packages.pacman}")
+  ];
+
   results = packagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks ++ desktopBackendChecks
-    ++ homeDesktopChecks ++ gcrootGuardChecks;
+    ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 
