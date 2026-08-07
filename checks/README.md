@@ -23,7 +23,7 @@ system-manager modules, and only system-manager itself provides `systemd.service
 would mean adding `numtide/system-manager` as a flake input just to run checks, for a project
 whose `flake.nix` deliberately has [one input](../flake.nix) and says so.
 
-Instead, `default.nix` declares the same three options as bare, opaque `attrsOf attrs` /
+Instead, `default.nix` declares the same handful of options as bare, opaque `attrsOf attrs` /
 `listOf package` stubs and evaluates the real module against those. This is the exact trick
 `experiments/desktop-backend-eval.nix` and `experiments/gcroot-guard-eval.nix` already used ad
 hoc; this file is the permanent version, covering every module those two didn't. One consequence
@@ -90,11 +90,25 @@ it. Stubbing it would only prove that this module writes the options it writes.
   exactly `"shelly"` to `pacman` and nothing to `aur` (it is the official CachyOS-repo package,
   not an AUR one); concatenates with a consumer's own `pacman` list rather than replacing it, the
   same property `desktop-backend` relies on.
+- **`logrotate`** — off by default, contributing nothing to `pacman` and rendering no
+  `environment.etc` entries at all; enabling adds exactly `"logrotate"` to `pacman` and
+  concatenates with a consumer's own list. The property this suite most wants to catch: enabling
+  renders `environment.etc."systemd/system/timers.target.wants/logrotate.timer"` pointed at the
+  real vendor unit path with `replaceExisting = true` set — the declarative equivalent of
+  `systemctl enable logrotate.timer`, proving the timer is actually wired rather than merely
+  installed-but-still-disabled, which is the live bug this module exists to fix. `dropins`
+  entries render under `logrotate.d/<name>` (string values as `text`, also with
+  `replaceExisting = true`), and enabling with no `dropins` declared adds none — this module ships
+  no default rotation policy. This is also the first module in this suite to exercise
+  `environment.etc`, so the stub gained that option (opaque `attrsOf attrs`, same shape as
+  `systemd.services`/`users.groups`) to support it.
 
 **Not covered yet:** `modules/foreign-service.nix` and the `ai-workstation` profile. Both are
 real, shipped modules; they just didn't make this first pass. Worth a follow-up in the same
 shape — `foreign-service.nix` in particular has a subtle `restartTriggers` cross-reference into
-`environment.etc.<dest>.source` that would benefit from the same treatment.
+`environment.etc.<dest>.source` that would benefit from the same treatment. The stub now carries
+an opaque `environment.etc` (added for `logrotate`'s coverage above), which removes what used to
+be the blocker for exercising `foreign-service.nix`'s own `environment.etc` output the same way.
 
 ## Running
 
@@ -105,7 +119,7 @@ yours lives elsewhere.
 
 ```console
 $ nix-instantiate --eval --strict -A eval-checks.passedCount checks
-"85"
+"102"
 ```
 
 A failing check throws before that derivation attribute even exists, with every failing check's

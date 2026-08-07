@@ -45,6 +45,14 @@ let
     options = {
       systemd.services = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
       environment.systemPackages = lib.mkOption { type = lib.types.listOf lib.types.package; default = [ ]; };
+      # Opaque, same shape as systemd.services/users.groups above -- added for modules/logrotate.nix,
+      # which is the first module in this suite to touch `environment.etc`
+      # (modules/foreign-service.nix does too, but is not yet in this suite -- see checks/README.md's
+      # "Not covered yet"). A real system-manager tree renders each entry into a submodule with its
+      # own `source`/`text`/`replaceExisting`; stubbing it as `attrsOf attrs` is enough to let a check
+      # read back the plain attrset a module authored, same as `systemd.services` already does for
+      # units, without pulling in system-manager's real option type just for this.
+      environment.etc = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
       users.groups = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
       # A real system-manager/NixOS tree declares these itself (the assertions/warnings
       # machinery); this hand-stubbed surface has to, too, now that device-gids.nix's own
@@ -971,8 +979,89 @@ let
       "got: ${builtins.toJSON shellyWithHostList.nixarch.packages.pacman}")
   ];
 
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # logrotate (modules/logrotate.nix) -- package + a declaratively-enabled foreign timer +
+  # /etc/logrotate.d/* drop-ins.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  evalLogrotate = extraConfig: evalMod [ ../modules/logrotate.nix ../modules/packages.nix extraConfig ];
+
+  logrotateDefault = evalLogrotate { };
+  logrotateOn = evalLogrotate { nixarch.logrotate.enable = true; };
+  logrotateWithHostList = evalMod [
+    ../modules/logrotate.nix
+    ../modules/packages.nix
+    { nixarch.logrotate.enable = true; nixarch.packages.pacman = [ "git" ]; }
+  ];
+  logrotateWithDropin = evalLogrotate {
+    nixarch.logrotate = {
+      enable = true;
+      dropins."corbet-app" = "/var/log/corbet-app/*.log { weekly }\n";
+    };
+  };
+
+  timerWantsPath = "systemd/system/timers.target.wants/logrotate.timer";
+
+  logrotateChecks = [
+    (check "logrotate/disabled-by-default"
+      (logrotateDefault.nixarch.logrotate.enable == false)
+      "got: ${builtins.toJSON logrotateDefault.nixarch.logrotate.enable}")
+
+    (check "logrotate/disabled-contributes-nothing-to-pacman"
+      (logrotateDefault.nixarch.packages.pacman == [ ])
+      "got: ${builtins.toJSON logrotateDefault.nixarch.packages.pacman}")
+
+    (check "logrotate/disabled-renders-no-etc-entries"
+      (logrotateDefault.environment.etc == { })
+      "got: ${builtins.toJSON (builtins.attrNames logrotateDefault.environment.etc)}")
+
+    (check "logrotate/enable-adds-logrotate-to-pacman"
+      (logrotateOn.nixarch.packages.pacman == [ "logrotate" ])
+      "got: ${builtins.toJSON logrotateOn.nixarch.packages.pacman}")
+
+    (check "logrotate/concatenates-with-a-consumers-own-pacman-list"
+      (lib.elem "logrotate" logrotateWithHostList.nixarch.packages.pacman
+        && lib.elem "git" logrotateWithHostList.nixarch.packages.pacman)
+      "got: ${builtins.toJSON logrotateWithHostList.nixarch.packages.pacman}")
+
+    # THE BUG THIS MODULE EXISTS TO FIX: logrotate.timer was found live-disabled on an already
+    # hand-installed box, so logs were never actually being rotated. This pins that enabling the
+    # module renders the exact symlink `systemctl enable logrotate.timer` itself would create.
+    (check "logrotate/enable-wires-the-timer-wants-symlink"
+      (logrotateOn.environment.etc ? "${timerWantsPath}")
+      "environment.etc keys: ${builtins.toJSON (builtins.attrNames logrotateOn.environment.etc)}")
+
+    (check "logrotate/timer-symlink-points-at-the-vendor-unit"
+      (logrotateOn.environment.etc.${timerWantsPath}.source == "/usr/lib/systemd/system/logrotate.timer")
+      "got: ${builtins.toJSON (logrotateOn.environment.etc.${timerWantsPath}.source or null)}")
+
+    # gotcha (a) from modules/foreign-service.nix's header, on this module's own mechanism: a
+    # host that had this enabled by hand before adopting the module already occupies this path,
+    # and system-manager silently skips an unclaimed `environment.etc` entry with no
+    # `replaceExisting`.
+    (check "logrotate/timer-symlink-sets-replace-existing"
+      (logrotateOn.environment.etc.${timerWantsPath}.replaceExisting == true)
+      "got: ${builtins.toJSON (logrotateOn.environment.etc.${timerWantsPath}.replaceExisting or null)}")
+
+    (check "logrotate/enable-with-no-dropins-declares-no-dropin-entries"
+      (!lib.any (n: lib.hasPrefix "logrotate.d/" n) (builtins.attrNames logrotateOn.environment.etc))
+      "environment.etc keys: ${builtins.toJSON (builtins.attrNames logrotateOn.environment.etc)}")
+
+    (check "logrotate/dropin-renders-under-logrotate-d"
+      (logrotateWithDropin.environment.etc ? "logrotate.d/corbet-app")
+      "environment.etc keys: ${builtins.toJSON (builtins.attrNames logrotateWithDropin.environment.etc)}")
+
+    (check "logrotate/dropin-string-installs-as-text"
+      (logrotateWithDropin.environment.etc."logrotate.d/corbet-app".text == "/var/log/corbet-app/*.log { weekly }\n")
+      "got: ${builtins.toJSON (logrotateWithDropin.environment.etc."logrotate.d/corbet-app".text or null)}")
+
+    (check "logrotate/dropin-also-sets-replace-existing"
+      (logrotateWithDropin.environment.etc."logrotate.d/corbet-app".replaceExisting == true)
+      "got: ${builtins.toJSON (logrotateWithDropin.environment.etc."logrotate.d/corbet-app".replaceExisting or null)}")
+  ];
+
   results = packagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks ++ desktopBackendChecks
-    ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks;
+    ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks ++ logrotateChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 

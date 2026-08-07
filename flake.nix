@@ -45,6 +45,13 @@
 
         foreign-service = ./modules/foreign-service.nix;
 
+        # logrotate: package + a declaratively-enabled timer (disabled by default on a bare
+        # install -- unlike reflector in base-packages.nix, nothing else owns what this timer
+        # rewrites, so enabling it is safe here) + `dropins` for /etc/logrotate.d/*. See
+        # modules/logrotate.nix for the full reasoning, including the `nixarch.packages.pacman`
+        # ~ shelly.nix parallel and the foreign-timer-enable mechanism.
+        logrotate = ./modules/logrotate.nix;
+
         # Detects the activated-but-never-registered generation -- the failure where `activate`
         # succeeds, `register` dies on a missing nix-env, and the running system quietly has no
         # GC root. Ships `nixarch-register` to fix it.
