@@ -108,6 +108,30 @@ rec {
 
   osds.swayosd = [ "swayosd" ];
 
+  # The input substrate — a keyboard remapping daemon below the compositor, rewriting events at
+  # the evdev/uinput layer so its mappings hold in a TTY, in a display manager and in every
+  # compositor alike. See nixdesktop's own `input` option for the full role description.
+  #
+  # ON ARCH, INSTALLING IT IS MOST OF THE WORK, which is the usual asymmetry this file exists for.
+  # The package drops `/usr/bin/keyd`, the `keyd.service` unit and the udev rules into the one
+  # shared prefix everything already reads; nixdesktop's NixOS table can say none of that, because
+  # there the daemon comes from `services.keyd.enable` and the package alone yields only the client
+  # binaries. Same role, two genuinely different amounts of work, which is exactly the split the
+  # backend indirection is for.
+  #
+  # WHAT IT STILL DOES NOT DO HERE: start. `keyd.service` ships disabled, and the daemon reads
+  # `/etc/keyd/*.conf`, which this package does not create. Neither is nixdesktop's business — the
+  # role installs a mechanism and takes no position on which key becomes which. A consumer wanting
+  # it running enables the vendor unit through its own mechanism (nixarch's own
+  # modules/foreign-service.nix is the declarative surface for exactly that class of unit).
+  #
+  # Verified 2026-08-08, the three-source method modules/base-packages.nix documents: `pacman -Si
+  # keyd` resolves in an official repository (`extra` upstream, served as a `cachyos-extra-v3`
+  # rebuild on a v3 host — a rebuild of the Arch repo, not a derivative-only package),
+  # archlinux.org's package search returns one result in `extra`, and the AUR RPC returns zero. So
+  # it is genuinely repo, not AUR, and correctly absent from `aurOnly` below.
+  inputRemappers.keyd = [ "keyd" ];
+
   # ── Capability roles: booleans in `want`, package sets here ─────────────────────────────────
 
   capabilities = {
@@ -319,6 +343,7 @@ rec {
       ++ resolve polkitAgents (want.polkitAgent or null)
       ++ resolve keyrings (want.keyring or null)
       ++ resolve osds (want.osd or null)
+      ++ resolve inputRemappers (want.input or null)
       ++ lib.optionals (want.launcher or null != null) [ want.launcher ]
       ++ lib.optionals (want.terminal or null != null) [ want.terminal ]
       ++ lib.concatLists (lib.mapAttrsToList

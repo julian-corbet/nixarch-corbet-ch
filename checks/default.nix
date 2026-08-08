@@ -742,6 +742,19 @@ let
   };
   pacmanOo7 = desktopOo7.nixarch.packages.pacman;
 
+  # The input substrate. A single-choice role defaulting to null, so BOTH directions are worth
+  # proving: an unfilled role must add nothing (the default every existing consumer already
+  # evaluates, where a regression would silently install a daemon nobody asked for), and a filled
+  # one must resolve through the table rather than through `resolve`'s bare-name fallthrough --
+  # which would happen to produce the same string here, and would therefore hide a missing table
+  # entry until some future role name stopped matching its package name.
+  desktopInputKeyd = evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; input = "keyd"; };
+  };
+  pacmanInputKeyd = desktopInputKeyd.nixarch.packages.pacman;
+
   # Gated on a nixdesktop checkout being reachable. nixarch deliberately does NOT take nixdesktop
   # as a flake input -- the family contract's R4 is that modules couple by option value, never by
   # dependency edge, and this backend reads `nixdesktop.want` precisely so no edge is needed. That
@@ -756,6 +769,20 @@ let
     (check "desktop-backend/polkit-agent-role-resolved"
       (lib.elem "mate-polkit" pacmanDefault)
       "pacman: ${builtins.toJSON pacmanDefault}")
+
+    (check "desktop-backend/input-role-unfilled-installs-no-remapper"
+      (!lib.elem "keyd" pacmanDefault)
+      "pacman: ${builtins.toJSON pacmanDefault}")
+
+    (check "desktop-backend/input-role-resolved-to-keyd"
+      (lib.elem "keyd" pacmanInputKeyd)
+      "pacman: ${builtins.toJSON pacmanInputKeyd}")
+
+    # keyd is an official-repo package, so it must not land in the AUR partition -- an AUR name
+    # in the pacman list is the failure this backend's whole `partitionAur` split exists to stop.
+    (check "desktop-backend/input-role-does-not-reach-the-aur-partition"
+      (!lib.elem "keyd" desktopInputKeyd.nixarch.packages.aur)
+      "aur: ${builtins.toJSON desktopInputKeyd.nixarch.packages.aur}")
 
     (check "desktop-backend/compositor-role-resolved"
       (lib.elem "niri" pacmanDefault && lib.elem "brightnessctl" pacmanDefault && lib.elem "playerctl" pacmanDefault)
