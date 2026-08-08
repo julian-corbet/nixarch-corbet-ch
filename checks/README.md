@@ -55,6 +55,7 @@ it. Stubbing it would only prove that this module writes the options it writes.
   itself behaves this way on a real box — see "Is/Isn't" above. That side was checked by hand:
   render the script, run it under stubbed `pacman`/`paru`/`runuser` with one package made to fail,
   confirm the others still install and the process exits non-zero.
+
 - **`base-packages`** — `reflector`, `rebuild-detector`, `arch-install-scripts`, `base` and
   `base-devel` land in `pacman` regardless of `nixarch.packages.distro` (the same answer on every
   Arch-family host); `paru` is the one name that splits on it — `aur` on the default `"arch"`
@@ -99,23 +100,44 @@ it. Stubbing it would only prove that this module writes the options it writes.
   same property `desktop-backend` relies on.
 - **`logrotate`** — off by default, contributing nothing to `pacman` and rendering no
   `environment.etc` entries at all; enabling adds exactly `"logrotate"` to `pacman` and
-  concatenates with a consumer's own list. The property this suite most wants to catch: enabling
-  renders `environment.etc."systemd/system/timers.target.wants/logrotate.timer"` pointed at the
-  real vendor unit path with `replaceExisting = true` set — the declarative equivalent of
-  `systemctl enable logrotate.timer`, proving the timer is actually wired rather than merely
-  installed-but-still-disabled, which is the live bug this module exists to fix. `dropins`
-  entries render under `logrotate.d/<name>` (string values as `text`, also with
-  `replaceExisting = true`), and enabling with no `dropins` declared adds none — this module ships
-  no default rotation policy. This is also the first module in this suite to exercise
-  `environment.etc`, so the stub gained that option (opaque `attrsOf attrs`, same shape as
-  `systemd.services`/`users.groups`) to support it.
+  concatenates with a consumer's own list. `dropins` entries render under `logrotate.d/<name>`
+  (string values as `text`, also with `replaceExisting = true`), and enabling with no `dropins`
+  declared adds none — this module ships no default rotation policy. This is also the first module
+  in this suite to exercise `environment.etc`, so the stub gained that option (opaque
+  `attrsOf attrs`, same shape as `systemd.services`/`users.groups`) to support it.
 
-**Not covered yet:** `modules/foreign-service.nix` and the `ai-workstation` profile. Both are
-real, shipped modules; they just didn't make this first pass. Worth a follow-up in the same
-shape — `foreign-service.nix` in particular has a subtle `restartTriggers` cross-reference into
-`environment.etc.<dest>.source` that would benefit from the same treatment. The stub now carries
-an opaque `environment.etc` (added for `logrotate`'s coverage above), which removes what used to
-be the blocker for exercising `foreign-service.nix`'s own `environment.etc` output the same way.
+  The property this suite most wants to catch is now a **negative**: enabling must NOT render an
+  `environment.etc."systemd/system/timers.target.wants/logrotate.timer"` entry. It used to, and
+  that entry deadlocked activation on any host without logrotate already installed — see
+  `studies/trusting-the-live-system.md`. What is checked instead is the replacement: a
+  `nixarch-logrotate-enable-timer` oneshot exists when enabled and not when disabled; it is ordered
+  `After=`/`Wants=` the package reconciler and does not hard-`Requires=` it; that reconcile unit
+  name is cross-checked against the unit `modules/packages.nix` actually declares, so a rename over
+  there fails here rather than silently turning the ordering into a reference to nothing; the unit
+  is *not* `RemainAfterExit`, so it re-asserts the enable every activation; it carries the host
+  PATH, without which `systemctl` does not resolve; and its script tests for the vendor unit
+  **before** enabling (an order, not a presence) and explains a missing one by naming the package,
+  the reconcile unit and `nixarch.packages.enable`. The module exposes
+  `nixarch.logrotate.enableTimerScript` for that static-text pass, the same way `packages` exposes
+  `reconcileScript`.
+- **`etc-source`** — the defect class above, guarded across every module rather than only the one
+  that got it wrong. An `environment.etc` entry whose `source` is a plain absolute-path **string**
+  pointing outside the store is an artefact built from live system state that nothing validates:
+  system-manager renders it with a bare `ln -s`, which succeeds against a nonexistent target, and
+  the resulting dangling link fails much later inside the activation engine's `fs::canonicalize`
+  with a message naming a store path rather than the missing package. Neither Nix nor
+  system-manager catches it — eval cannot know the target host's filesystem, and the build sandbox
+  has no `/usr` at all — so this sweep does, over every evaluated config in the suite. A positive
+  control feeds it the exact shape that broke a live host, so the sweep cannot pass by being
+  vacuous. `foreign-service.nix` is pulled into this one sweep (it is otherwise not covered) because
+  it is the other module that writes `environment.etc` from caller-supplied values: a string handed
+  to it must land in `text`, never in `source`.
+
+**Not covered yet:** `modules/foreign-service.nix` beyond the `etc-source` sweep above, and the
+`ai-workstation` profile. Both are real, shipped modules; they just didn't make this first pass.
+Worth a follow-up in the same shape — `foreign-service.nix` in particular has a subtle
+`restartTriggers` cross-reference into `environment.etc.<dest>.source` that would benefit from the
+same treatment.
 
 ## Running
 
@@ -126,26 +148,27 @@ yours lives elsewhere.
 
 ```console
 $ nix-instantiate --eval --strict -A eval-checks.passedCount checks
-"107"
+"167"
 ```
 
 A failing check throws before that derivation attribute even exists, with every failing check's
 name and a `got: ...` detail — not just the first one:
 
 ```
-error: nixarch eval-checks FAILED (1/85):
+error: nixarch eval-checks FAILED (1/167):
   - packages/prune-undeclared-defaults-off: got: true
 ```
 
-## Not wired into `flake.nix`
+## `nix flake check` runs a subset
 
-Deliberately. `flake.nix`'s own header explains why `nixdesktop` isn't a flake input: the
-`desktop-backend` section here needs it in the same evaluation, and adding it as an input would
-force every consumer of nixarch — the many who use it without a desktop at all — to fetch it on
-every evaluation. The `nixdesktop` sibling-checkout default above is a filesystem path outside
-this flake's own source tree, which a real flake evaluation (`nix flake check`, `nix build
-.#checks.<system>.eval-checks`) resolves against a copied, sandboxed store path, not your working
-tree — so wiring `checks` into `flake.nix` as written would break the moment anyone without that
-exact sibling layout ran `nix flake check`, or would need `nixdesktop` promoted to a real flake
-input either way, undoing that documented design decision. Run it directly with
-`nix-instantiate`, the same way `experiments/*.nix` already are.
+`flake.nix` wires this suite in as `checks.<system>.eval-checks`, passing `nixdesktop = null` — so
+`nix flake check` runs everything except the `desktop-backend` and `home-desktop` sections, and the
+result derivation records what it skipped rather than hiding it.
+
+That split is not laziness. `flake.nix`'s own header explains why `nixdesktop` isn't a flake input:
+those two sections need it in the same evaluation, and adding it as an input would force every
+consumer of nixarch — the many who use it without a desktop at all — to fetch it on every
+evaluation. The `nixdesktop` sibling-checkout default above is a filesystem path outside this
+flake's own source tree, which a real flake evaluation resolves against a copied, sandboxed store
+path rather than your working tree, so it cannot be reached from `nix flake check` at all. Run the
+standalone `nix-instantiate` invocation above to cover those two.

@@ -66,6 +66,30 @@ let
 
   check = name: ok: detail: { inherit name ok detail; };
 
+  # Character offset of the first occurrence of `needle` in `haystack`, or `null`. `lib.hasInfix`
+  # can say a construct is PRESENT in a generated script; some properties are about two constructs
+  # being present IN A PARTICULAR ORDER -- a guard that runs after the thing it guards is not a
+  # guard -- and that needs an offset to compare. Implemented by splitting rather than by walking
+  # the string one index at a time, which on a 15 kB script would recurse deeper than Nix's
+  # evaluator is comfortable with. `lib.splitString` escapes its separator, so needles carrying
+  # shell punctuation (`[`, `!`, `$`) are literal here, not patterns.
+  firstInfixIndex = needle: haystack:
+    let parts = lib.splitString needle haystack;
+    in if builtins.length parts < 2 then null else builtins.stringLength (builtins.head parts);
+
+  # The slice of `s` between the first occurrence of `from` and the first `to` after it, or `""`.
+  #
+  # WHY A TEXT CHECK NEEDS SCOPING AT ALL. These modules generate shell scripts that carry their
+  # own reasoning as comments, and a comment explaining a message necessarily uses the same words
+  # as the message. A bare `hasInfix "partial upgrade"` over the whole script therefore stays green
+  # after the sentence has been deleted from the operator-facing `echo`, because the comment above
+  # it still says the words. An assertion about what a particular MESSAGE says has to be scoped to
+  # that message; this is what scopes it.
+  infixBetween = from: to: s:
+    let head = lib.splitString from s;
+    in if builtins.length head < 2 then ""
+    else builtins.head (lib.splitString to (builtins.elemAt head 1));
+
   # Evaluate one or more nixarch modules against the stub above, plus whatever config a test
   # needs. `pkgs` is threaded in via `_module.args` because several modules call
   # `pkgs.writeShellScript`/`pkgs.writeShellApplication` directly (not via `config._module.args.pkgs`
@@ -159,6 +183,7 @@ let
   # `aurUser` left at its null default: the whole fallback branch is compiled OUT, not merely
   # unreachable -- `pkgsDeclared` already covers `aur = [ "yay" ]` with no `aurUser` set.
   noAurUserText = pkgsDeclared.nixarch.packages.reconcileScript.text;
+
 
   packagesChecks = [
     (check "packages/pacman-declared-round-trips"
@@ -1387,7 +1412,7 @@ let
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
-  # logrotate (modules/logrotate.nix) -- package + a declaratively-enabled foreign timer +
+  # logrotate (modules/logrotate.nix) -- package + a timer enabled after the reconciler +
   # /etc/logrotate.d/* drop-ins.
   # ═══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -1408,6 +1433,7 @@ let
   };
 
   timerWantsPath = "systemd/system/timers.target.wants/logrotate.timer";
+  enableTimerText = logrotateOn.nixarch.logrotate.enableTimerScript.text;
 
   logrotateChecks = [
     (check "logrotate/disabled-by-default"
@@ -1432,23 +1458,84 @@ let
       "got: ${builtins.toJSON logrotateWithHostList.nixarch.packages.pacman}")
 
     # THE BUG THIS MODULE EXISTS TO FIX: logrotate.timer was found live-disabled on an already
-    # hand-installed box, so logs were never actually being rotated. This pins that enabling the
-    # module renders the exact symlink `systemctl enable logrotate.timer` itself would create.
-    (check "logrotate/enable-wires-the-timer-wants-symlink"
-      (logrotateOn.environment.etc ? "${timerWantsPath}")
+    # hand-installed box, so logs were never actually being rotated. Enabling the module has to
+    # produce the state `systemctl enable logrotate.timer` produces -- but NOT by declaring a
+    # `timers.target.wants` symlink into the store, which is what the checks below pin instead.
+    (check "logrotate/enable-declares-no-timers-target-wants-etc-entry"
+      (!(logrotateOn.environment.etc ? "${timerWantsPath}"))
       "environment.etc keys: ${builtins.toJSON (builtins.attrNames logrotateOn.environment.etc)}")
 
-    (check "logrotate/timer-symlink-points-at-the-vendor-unit"
-      (logrotateOn.environment.etc.${timerWantsPath}.source == "/usr/lib/systemd/system/logrotate.timer")
-      "got: ${builtins.toJSON (logrotateOn.environment.etc.${timerWantsPath}.source or null)}")
+    (check "logrotate/enable-renders-a-timer-enable-unit"
+      (logrotateOn.systemd.services ? "nixarch-logrotate-enable-timer")
+      "systemd.services keys: ${builtins.toJSON (builtins.attrNames logrotateOn.systemd.services)}")
 
-    # gotcha (a) from modules/foreign-service.nix's header, on this module's own mechanism: a
-    # host that had this enabled by hand before adopting the module already occupies this path,
-    # and system-manager silently skips an unclaimed `environment.etc` entry with no
-    # `replaceExisting`.
-    (check "logrotate/timer-symlink-sets-replace-existing"
-      (logrotateOn.environment.etc.${timerWantsPath}.replaceExisting == true)
-      "got: ${builtins.toJSON (logrotateOn.environment.etc.${timerWantsPath}.replaceExisting or null)}")
+    (check "logrotate/disabled-renders-no-timer-enable-unit"
+      (!(logrotateDefault.systemd.services ? "nixarch-logrotate-enable-timer"))
+      "systemd.services keys: ${builtins.toJSON (builtins.attrNames logrotateDefault.systemd.services)}")
+
+    # THE ORDERING IS THE ENTIRE FIX. The timer can only be enabled once the package that ships
+    # the unit is installed, and the only thing that installs it is the reconciler -- which is a
+    # unit, and therefore runs after system-manager has already activated /etc. Enabling from
+    # /etc was a deadlock: the link needed the package, the package needed the reconciler, the
+    # reconciler needed activation past the /etc stage, and the /etc stage died on the link.
+    (check "logrotate/timer-enable-unit-runs-after-the-package-reconciler"
+      (let u = logrotateOn.systemd.services.nixarch-logrotate-enable-timer or { }; in
+        (u.after or [ ]) == [ "nixarch-packages-reconcile.service" ]
+        && (u.wants or [ ]) == [ "nixarch-packages-reconcile.service" ])
+      "got after/wants: ${builtins.toJSON [ (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.after or null) (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.wants or null) ]}")
+
+    # ...and that unit name is not a guess. modules/packages.nix owns it; if it is ever renamed,
+    # the `After=`/`Wants=` above becomes a reference to nothing and the ordering silently stops
+    # existing -- which is the same class of silent-wrong-answer the whole change is about.
+    (check "logrotate/timer-enable-orders-after-a-unit-that-actually-exists"
+      (lib.elem "nixarch-packages-reconcile"
+        (builtins.attrNames (evalPackages { nixarch.packages.enable = true; }).systemd.services))
+      "modules/packages.nix declares: ${builtins.toJSON (builtins.attrNames (evalPackages { nixarch.packages.enable = true; }).systemd.services)}")
+
+    # `Wants=`, never `Requires=`: the reconcile unit only exists when nixarch.packages.enable is
+    # true, and a Requires= on an undeclared unit fails the job outright on a host that manages
+    # its packages some other way.
+    (check "logrotate/timer-enable-does-not-hard-require-the-reconciler"
+      (!((logrotateOn.systemd.services.nixarch-logrotate-enable-timer or { }) ? requires))
+      "the timer-enable unit declares `requires`, which fails outright when nixarch.packages.enable is false")
+
+    # Not RemainAfterExit, unlike the reconciler: system-manager restarts a unit only when its own
+    # store path moved, so a RemainAfterExit oneshot that already succeeded would never re-assert
+    # the enable. Left to go inactive, system-manager.target pulls it up again every activation --
+    # which is the one property the removed `environment.etc` entry gave for free.
+    (check "logrotate/timer-enable-unit-re-asserts-on-every-activation"
+      ((logrotateOn.systemd.services.nixarch-logrotate-enable-timer.serviceConfig.RemainAfterExit or null) == false)
+      "got: ${builtins.toJSON (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.serviceConfig.RemainAfterExit or null)}")
+
+    # Without this the unit cannot find `systemctl` at all -- system-manager injects a
+    # nix-store-only PATH into everything it declares. See lib/host-path.nix.
+    (check "logrotate/timer-enable-unit-carries-the-host-path"
+      ((unwrap (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.environment.PATH or null)) == hostPaths.hostPath)
+      "got: ${builtins.toJSON (unwrap (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.environment.PATH or null))}")
+
+    # A missing vendor unit is now a named failure on the box instead of a canonicalize error
+    # about a store path. Pinned as an ORDER, not a presence: the existence test has to come
+    # BEFORE the enable, or it is decoration. The message itself is checked separately, scoped to
+    # the message, for the same reason the staleness abort is.
+    (check "logrotate/timer-enable-script-tests-for-the-vendor-unit-before-enabling"
+      (let
+        guardIdx = firstInfixIndex ''if [ ! -e "$unit" ]'' enableTimerText;
+        enableIdx = firstInfixIndex "systemctl enable --now logrotate.timer" enableTimerText;
+      in guardIdx != null && enableIdx != null && guardIdx < enableIdx
+        && lib.hasInfix "unit=/usr/lib/systemd/system/logrotate.timer" enableTimerText)
+      "the timer-enable script does not test for the vendor unit before running `systemctl enable`. got: ${builtins.toJSON enableTimerText}")
+
+    (check "logrotate/timer-enable-failure-names-the-package-and-the-reconciler"
+      (let m = infixBetween "does not exist" "exit 1" enableTimerText; in
+        lib.hasInfix "logrotate package is not installed" m
+        && lib.hasInfix "nixarch-packages-reconcile.service" m
+        && lib.hasInfix "nixarch.packages.enable" m)
+      "the missing-vendor-unit message does not name the package, the reconcile unit and the option that switches it on. got: ${builtins.toJSON (infixBetween "does not exist" "exit 1" enableTimerText)}")
+
+    (check "logrotate/timer-enable-execstart-is-that-script"
+      (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.serviceConfig.ExecStart
+        == "${logrotateOn.nixarch.logrotate.enableTimerScript}")
+      "got: ${builtins.toJSON (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.serviceConfig.ExecStart or null)}")
 
     (check "logrotate/enable-with-no-dropins-declares-no-dropin-entries"
       (!lib.any (n: lib.hasPrefix "logrotate.d/" n) (builtins.attrNames logrotateOn.environment.etc))
@@ -1467,9 +1554,83 @@ let
       "got: ${builtins.toJSON (logrotateWithDropin.environment.etc."logrotate.d/corbet-app".replaceExisting or null)}")
   ];
 
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # THE DEFECT CLASS, guarded across every module rather than only the one that got it wrong.
+  #
+  # An `environment.etc` entry whose `source` is a plain absolute-path STRING pointing OUTSIDE the
+  # store is an artefact built from live system state that nothing validates. system-manager
+  # renders each entry with a bare `mkdir -p` + `ln -s "$source"` (nix/modules/default.nix,
+  # `addToStore`), and `ln -s` never looks at its target: when the target is absent the derivation
+  # BUILDS FINE and contains a dangling link. The failure arrives much later and somewhere else --
+  # the activation engine walks the merged etc environment calling `fs::canonicalize`
+  # (crates/system-manager-engine/src/activate/etc_files.rs) and dies with ENOENT on a store path,
+  # a message that says nothing about the missing package. Neither Nix nor system-manager catches
+  # it: eval cannot know the target host's filesystem, and the build sandbox has no /usr at all.
+  # So this suite catches it. See studies/trusting-the-live-system.md.
+  #
+  # Store-path strings are fine (that is `"${drv}"`), Nix paths are fine (imported into the store),
+  # `text` is fine. Only "a path on some machine's live filesystem, resolved at build time" is not.
+  liveSourceEtcEntries = cfgs:
+    lib.concatMap
+      (c: lib.filter (e: e != null) (lib.mapAttrsToList
+        (name: entry:
+          let src = entry.source or null; in
+          if lib.isString src && !(lib.hasPrefix builtins.storeDir src)
+          then "${name} -> ${src}"
+          else null)
+        c.environment.etc))
+      cfgs;
+
+  # foreign-service.nix is otherwise not in this suite (see checks/README.md), but it is the other
+  # module in the project that writes `environment.etc` from caller-supplied values, so it belongs
+  # in this particular sweep: a caller handing it a live path as a STRING must land in `text`, not
+  # in `source`.
+  foreignServiceEtc = evalMod [
+    ../modules/foreign-service.nix
+    {
+      nixarch.foreignServices.demo = {
+        configFiles."demo.conf" = "/usr/lib/systemd/system/demo.timer";
+        restartUnits = [ "demo.service" ];
+      };
+    }
+  ];
+
+  liveSourceOffenders = liveSourceEtcEntries [
+    logrotateDefault
+    logrotateOn
+    logrotateWithHostList
+    logrotateWithDropin
+    foreignServiceEtc
+  ];
+
+  # Positive control: the sweep above must have teeth. This is the exact shape that broke a live
+  # host, handed to the same function -- if it comes back empty the guard is vacuous.
+  liveSourcePositiveControl = liveSourceEtcEntries [
+    { environment.etc."systemd/system/timers.target.wants/logrotate.timer".source =
+        "/usr/lib/systemd/system/logrotate.timer"; }
+  ];
+
+  etcSourceClassChecks = [
+    (check "etc-source/no-module-renders-an-etc-source-outside-the-store"
+      (liveSourceOffenders == [ ])
+      "offending entries: ${builtins.toJSON liveSourceOffenders}")
+
+    (check "etc-source/the-guard-above-is-not-vacuous"
+      (liveSourcePositiveControl == [ "systemd/system/timers.target.wants/logrotate.timer -> /usr/lib/systemd/system/logrotate.timer" ])
+      "got: ${builtins.toJSON liveSourcePositiveControl}")
+
+    # `or null` rather than a bare attribute read: if the module ever routes a string into `source`
+    # instead, the entry has no `text` at all, and a bare read would abort the whole suite with an
+    # attribute error instead of failing this one check with a legible `got:`.
+    (check "etc-source/foreign-service-puts-a-string-in-text-not-source"
+      ((foreignServiceEtc.environment.etc."demo.conf".text or null) == "/usr/lib/systemd/system/demo.timer"
+        && !(foreignServiceEtc.environment.etc."demo.conf" ? source))
+      "got: ${builtins.toJSON foreignServiceEtc.environment.etc."demo.conf"}")
+  ];
+
   results = packagesChecks ++ basePackagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks
     ++ desktopBackendChecks ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks
-    ++ cachyosToolsChecks ++ cachyosSettingsChecks ++ logrotateChecks;
+    ++ cachyosToolsChecks ++ cachyosSettingsChecks ++ logrotateChecks ++ etcSourceClassChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 
