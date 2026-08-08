@@ -55,8 +55,10 @@ a toy demo or marketing page. As of this writing:
     `gcroot-guard` (catches the activated-but-unregistered generation),
     `desktop-backend` (resolves nixdesktop roles into Arch packages),
     `shelly` (nixarch's own opinionated package: a graphical pacman/AUR front-end),
-    and `cachyos-tools` (CachyOS's own update notifier, welcome app, kernel GUI and
-    package installer, four independent `enable`s, distro-gated).
+    `cachyos-tools` (CachyOS's own update notifier, welcome app, kernel GUI and
+    package installer, four independent `enable`s, distro-gated), and
+    `cachyos-settings` (that distro's whole-system tuning profile, kept as a
+    deliberate base layer under a host's own declarations).
   - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle),
     `dev` (git config and direnv/nix-direnv integration), and `desktop`
     (Arch spawn commands for nixdesktop's session components).
@@ -448,7 +450,7 @@ Arch/CachyOS machines.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, base-packages, foreign-service, logrotate, gcroot-guard, desktop-backend, shelly, cachyos-tools), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
+| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, base-packages, foreign-service, logrotate, gcroot-guard, desktop-backend, shelly, cachyos-tools, cachyos-settings), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
 | `lib/` | Pure data shared across module classes — `desktop-roles.nix` (Arch resolution tables for nixdesktop roles) and `host-path.nix` (the host PATH every unit driving pacman/nix needs). |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |

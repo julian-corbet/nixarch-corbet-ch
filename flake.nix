@@ -73,6 +73,14 @@
         # four exists in upstream Arch or the AUR at all. Same shelly-shaped mechanism (a name
         # into `nixarch.packages.pacman`, nothing else); see modules/cachyos-tools.nix.
         cachyos-tools = ./modules/cachyos-tools.nix;
+
+        # CachyOS's whole-system tuning profile (sysctl, zram, THP, I/O schedulers, device power,
+        # audio latency, modprobe, cgroup delegation) declared as a deliberate BASE LAYER: every
+        # directory it writes to is `/usr/lib` vendor + `/etc` local, and local wins, so it is the
+        # floor a host's own declarations sit on rather than a competing writer. Distro-gated and
+        # asserted like cachyos-tools. See modules/cachyos-settings.nix for the full inventory,
+        # the measured sysctl state and the domain overlaps keeping it implies.
+        cachyos-settings = ./modules/cachyos-settings.nix;
       };
       nixosModules = {
         # NixOS realises users with the same userborn as system-manager and

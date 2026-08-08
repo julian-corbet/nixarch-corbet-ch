@@ -1175,6 +1175,51 @@ let
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # cachyos-settings (modules/cachyos-settings.nix) -- the whole-system tuning profile, kept as a
+  # deliberate base layer. Same gate, same hazard and same assertion contract as cachyos-tools
+  # above; proven separately rather than inferred from that module, since the two share a shape
+  # but not a line of code.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  evalCachyosSettings = extraConfig:
+    evalMod [ ../modules/cachyos-settings.nix ../modules/packages.nix extraConfig ];
+
+  cachySettingsDefault = evalCachyosSettings { nixarch.packages.distro = "cachyos"; };
+  cachySettingsOn = evalCachyosSettings {
+    nixarch.packages.distro = "cachyos";
+    nixarch.cachyosSettings.enable = true;
+  };
+  cachySettingsWrongDistro = evalCachyosSettings {
+    nixarch.cachyosSettings.enable = true;
+  };
+
+  cachyosSettingsChecks = [
+    (check "cachyos-settings/disabled-by-default"
+      (cachySettingsDefault.nixarch.packages.pacman == [ ])
+      "got: ${builtins.toJSON cachySettingsDefault.nixarch.packages.pacman}")
+
+    (check "cachyos-settings/enable-adds-the-package-on-a-cachyos-host"
+      (cachySettingsOn.nixarch.packages.pacman == [ "cachyos-settings" ])
+      "got: ${builtins.toJSON cachySettingsOn.nixarch.packages.pacman}")
+
+    (check "cachyos-settings/enable-adds-nothing-to-aur"
+      (cachySettingsOn.nixarch.packages.aur == [ ])
+      "got: ${builtins.toJSON cachySettingsOn.nixarch.packages.aur}")
+
+    (check "cachyos-settings/enabled-on-plain-arch-emits-no-package"
+      (cachySettingsWrongDistro.nixarch.packages.pacman == [ ])
+      "got: ${builtins.toJSON cachySettingsWrongDistro.nixarch.packages.pacman}")
+
+    (check "cachyos-settings/enabled-on-plain-arch-fails-an-assertion"
+      (lib.any (a: !a.assertion) cachySettingsWrongDistro.assertions)
+      "assertions: ${builtins.toJSON (map (a: a.assertion) cachySettingsWrongDistro.assertions)}")
+
+    (check "cachyos-settings/no-assertion-fires-on-a-cachyos-host"
+      (builtins.all (a: a.assertion) cachySettingsOn.assertions)
+      "assertions: ${builtins.toJSON (map (a: a.assertion) cachySettingsOn.assertions)}")
+  ];
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
   # logrotate (modules/logrotate.nix) -- package + a declaratively-enabled foreign timer +
   # /etc/logrotate.d/* drop-ins.
   # ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -1257,7 +1302,7 @@ let
 
   results = packagesChecks ++ basePackagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks
     ++ desktopBackendChecks ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks
-    ++ cachyosToolsChecks ++ logrotateChecks;
+    ++ cachyosToolsChecks ++ cachyosSettingsChecks ++ logrotateChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 
