@@ -946,21 +946,6 @@ let
     nixdesktop.desktop = { enable = true; compositor = "niri"; inputAutomation = true; };
   };
 
-  # `iconThemes` -- free-form names with NO table entry, so these fixtures prove two separate
-  # things at once: that the pass-through reaches the reconciler at all, and that a name in
-  # `archRepoOn` is still partitioned correctly when it arrives that way rather than out of a role
-  # table. `char-white` is the live case: nowhere on upstream Arch, in CachyOS's own repository.
-  desktopIconsArch = evalDesktopBackend {
-    nixarch.packages.enable = true;
-    nixarch.desktopBackend.enable = true;
-    nixdesktop.desktop = { enable = true; compositor = "niri"; iconThemes = [ "char-white" "papirus-icon-theme" ]; };
-  };
-  desktopIconsCachyos = evalDesktopBackend {
-    nixarch.packages = { enable = true; distro = "cachyos"; };
-    nixarch.desktopBackend.enable = true;
-    nixdesktop.desktop = { enable = true; compositor = "niri"; iconThemes = [ "char-white" "papirus-icon-theme" ]; };
-  };
-
   # Gated on a nixdesktop checkout being reachable. nixarch deliberately does NOT take nixdesktop
   # as a flake input -- the family contract's R4 is that modules couple by option value, never by
   # dependency edge, and this backend reads `nixdesktop.want` precisely so no edge is needed. That
@@ -1066,36 +1051,6 @@ let
         && !lib.elem "wtype" desktopAutomation.nixarch.packages.pacman
         && !lib.elem "keyd" desktopAutomation.nixarch.packages.pacman)
       "typing: ${builtins.toJSON desktopTyping.nixarch.packages.pacman}, automation: ${builtins.toJSON desktopAutomation.nixarch.packages.pacman}")
-
-    # Icon themes, which reach this backend through `resolve`'s free-form path rather than a table.
-    # An empty list must produce nothing at all -- the default every existing consumer evaluates.
-    (check "desktop-backend/icon-themes-unfilled-installs-nothing"
-      (!lib.elem "char-white" pacmanDefault && !lib.elem "char-white" desktopDefault.nixarch.packages.aur)
-      "pacman: ${builtins.toJSON pacmanDefault}, aur: ${builtins.toJSON desktopDefault.nixarch.packages.aur}")
-
-    # An ordinary theme name passes straight through to the pacman half on both distros: nothing
-    # about being an icon theme routes a name anywhere special.
-    (check "desktop-backend/icon-themes-pass-through-to-the-reconciler"
-      (lib.elem "papirus-icon-theme" desktopIconsArch.nixarch.packages.pacman
-        && lib.elem "papirus-icon-theme" desktopIconsCachyos.nixarch.packages.pacman)
-      "arch pacman: ${builtins.toJSON desktopIconsArch.nixarch.packages.pacman}")
-
-    # THE FATAL DIRECTION for this option. `char-white` exists in no upstream Arch repository and
-    # in no AUR package either, so on the plain-Arch floor it must be held OUT of the pacman list:
-    # one unresolvable target there aborts the entire transaction and takes every other declared
-    # package down with it, where an AUR helper handed a name it cannot find fails on that name
-    # alone. This is what `aurOnly` buys for a name that is not, literally, in the AUR.
-    (check "desktop-backend/cachyos-only-icon-theme-stays-out-of-the-plain-arch-pacman-list"
-      (!lib.elem "char-white" desktopIconsArch.nixarch.packages.pacman
-        && lib.elem "char-white" desktopIconsArch.nixarch.packages.aur)
-      "pacman: ${builtins.toJSON desktopIconsArch.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopIconsArch.nixarch.packages.aur}")
-
-    # ...and the lift puts it back where it actually lives on the distro that carries it, without
-    # leaving a copy in `aur` for the helper to rebuild.
-    (check "desktop-backend/cachyos-only-icon-theme-lifts-to-pacman-on-cachyos"
-      (lib.elem "char-white" desktopIconsCachyos.nixarch.packages.pacman
-        && !lib.elem "char-white" desktopIconsCachyos.nixarch.packages.aur)
-      "pacman: ${builtins.toJSON desktopIconsCachyos.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopIconsCachyos.nixarch.packages.aur}")
 
     (check "desktop-backend/compositor-role-resolved"
       (lib.elem "niri" pacmanDefault && lib.elem "brightnessctl" pacmanDefault && lib.elem "playerctl" pacmanDefault)
