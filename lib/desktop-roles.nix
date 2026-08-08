@@ -158,6 +158,17 @@ rec {
     # two are different programs, not two names for one.
     browsers = [ "firefox" "chromium" ];
 
+    # A graphical duplicate/waste finder. The GUI has its OWN package name here -- the project
+    # also ships a headless `czkawka-cli`, which is a separate package and deliberately not
+    # declared: a terminal-first tool belongs to whichever repo owns the terminal, not to the
+    # desktop. nixdesktop's NixOS table needs no such distinction; one attribute there provides
+    # the GUI outright.
+    #
+    # AUR-ONLY UPSTREAM, LIFTED ON A DERIVATIVE -- see `aurOnly` and `archRepoOn` below for the
+    # verification and the mechanism. Named flatly here regardless: which channel a package comes
+    # from is a property of the package, not of the role, so the tables stay free of it.
+    duplicateFinder = [ "czkawka-gui" ];
+
     # ── fileManagerExtras ─────────────────────────────────────────────────────────────────────
     #
     # A flat name list, which is the whole Arch story for this role: a thunarx plugin here is an
@@ -312,13 +323,46 @@ rec {
     "eww"
     # In the AUR only; see the `compositors.scroll` entry above for the full account.
     "sway-scroll"
+    # In the AUR only UPSTREAM -- but see `archRepoOn` immediately below, which lifts it back into
+    # the pacman transaction on a derivative whose own repository ships a prebuilt one.
+    "czkawka-gui"
   ];
 
-  # Partition a resolved package list into what `pacman -S` can take and what needs an AUR helper.
-  partitionAur = packages: {
-    repo = lib.filter (p: !(lib.elem p aurOnly)) packages;
-    aur = lib.filter (p: lib.elem p aurOnly) packages;
+  # ── Names that are AUR-only UPSTREAM but repo-carried on a derivative ────────────────────────
+  #
+  # The same fact `paru` has in modules/base-packages.nix, and the same field nixagent, nixmsg and
+  # nixgames each carry on their own catalogue entries: a package upstream Arch does not build,
+  # which a derivative chose to ship a prebuilt binary of. `aurOnly` above is the FLOOR -- correct
+  # for plain Arch, and the direction that cannot abort a pacman transaction, since an AUR helper
+  # happily installs a repo package but `pacman -S` on an AUR-only name kills the whole batch.
+  # This lifts a name off that floor, and only for a distro whose repository is known to carry it.
+  #
+  # Keyed by distro rather than expressed as a per-entry field, matching `aurOnly`'s own reasoning
+  # one paragraph up: which repository carries a package is a property of the PACKAGE, not of the
+  # role it happens to fill, and these tables are read by home/desktop.nix too.
+  #
+  # `czkawka-gui`, verified 2026-08-08 the three-source way modules/base-packages.nix documents:
+  # `pacman -Si czkawka-gui` on a live CachyOS box resolves `Repository : cachyos` -- that
+  # derivative's OWN repository, not one of its `*-v3` rebuilds of an Arch one; archlinux.org's
+  # package search returns ZERO results, so upstream Arch packages it nowhere; the AUR RPC returns
+  # one, which is where a plain Arch host gets it.
+  archRepoOn = {
+    cachyos = [ "czkawka-gui" ];
   };
+
+  # Partition a resolved package list into what `pacman -S` can take and what needs an AUR helper.
+  # Takes the host's declared distro (`nixarch.packages.distro`) so `archRepoOn` above can lift a
+  # name back into the pacman half; a caller that has no distro to offer passes "arch", which is
+  # the floor and is never wrong in the fatal direction.
+  partitionAur = distro: packages:
+    let
+      lifted = archRepoOn.${distro} or [ ];
+      fromAur = p: lib.elem p aurOnly && !(lib.elem p lifted);
+    in
+    {
+      repo = lib.filter (p: !(fromAur p)) packages;
+      aur = lib.filter fromAur packages;
+    };
 
   # ── Resolution ──────────────────────────────────────────────────────────────────────────────
 

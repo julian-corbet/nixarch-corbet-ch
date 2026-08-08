@@ -674,6 +674,11 @@ let
       enable = lib.mkEnableOption "stub";
       pacman = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
       aur = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+      # `distro` stubbed here (2026-08-08) because modules/desktop-backend.nix now reads it to
+      # feed `partitionAur`'s `archRepoOn` lift. Same default as the real option in
+      # ../modules/packages.nix -- "arch", the floor -- so a fixture that says nothing gets the
+      # answer that cannot abort a pacman transaction, exactly as a real host would.
+      distro = lib.mkOption { type = lib.types.str; default = "arch"; };
     };
   };
 
@@ -755,6 +760,23 @@ let
   };
   pacmanInputKeyd = desktopInputKeyd.nixarch.packages.pacman;
 
+  # `duplicateFinder` -- the one role today whose package is AUR-only UPSTREAM and repo-carried on
+  # a derivative, so it is the live proof that `archRepoOn`/`partitionAur` actually lift rather
+  # than merely being written down. Evaluated on BOTH distro answers: testing one would leave half
+  # the resolution unproven, and the two halves fail in opposite directions -- a missed lift only
+  # costs a needless source build, while a WRONG lift puts an unresolvable name in the pacman list
+  # and kills the whole desktop transaction.
+  desktopDupArch = evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; duplicateFinder = true; };
+  };
+  desktopDupCachyos = evalDesktopBackend {
+    nixarch.packages = { enable = true; distro = "cachyos"; };
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; duplicateFinder = true; };
+  };
+
   # Gated on a nixdesktop checkout being reachable. nixarch deliberately does NOT take nixdesktop
   # as a flake input -- the family contract's R4 is that modules couple by option value, never by
   # dependency edge, and this backend reads `nixdesktop.want` precisely so no edge is needed. That
@@ -783,6 +805,37 @@ let
     (check "desktop-backend/input-role-does-not-reach-the-aur-partition"
       (!lib.elem "keyd" desktopInputKeyd.nixarch.packages.aur)
       "aur: ${builtins.toJSON desktopInputKeyd.nixarch.packages.aur}")
+
+    (check "desktop-backend/duplicate-finder-unfilled-installs-nothing"
+      (!lib.elem "czkawka-gui" pacmanDefault
+        && !lib.elem "czkawka-gui" desktopDefault.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON pacmanDefault}, aur: ${builtins.toJSON desktopDefault.nixarch.packages.aur}")
+
+    # On the plain-Arch floor the name goes through the AUR helper, because upstream Arch packages
+    # it nowhere -- and it must NOT appear in the pacman list, which is the fatal direction.
+    (check "desktop-backend/duplicate-finder-is-aur-on-the-plain-arch-floor"
+      (lib.elem "czkawka-gui" desktopDupArch.nixarch.packages.aur
+        && !lib.elem "czkawka-gui" desktopDupArch.nixarch.packages.pacman)
+      "pacman: ${builtins.toJSON desktopDupArch.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopDupArch.nixarch.packages.aur}")
+
+    # THE LIFT. On a distro whose own repository ships a prebuilt one, it moves to the pacman
+    # transaction and must not linger in `aur` as well -- a name in both lists means the helper
+    # rebuilds from source something the repo already provides.
+    (check "desktop-backend/duplicate-finder-lifts-to-pacman-on-cachyos"
+      (lib.elem "czkawka-gui" desktopDupCachyos.nixarch.packages.pacman
+        && !lib.elem "czkawka-gui" desktopDupCachyos.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON desktopDupCachyos.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopDupCachyos.nixarch.packages.aur}")
+
+    # The lift is SCOPED to the entry that names it, not "everything AUR becomes repo on cachyos".
+    # eww carries no archRepoOn, and a regression collapsing the two would put an unresolvable
+    # name in the pacman list on every CachyOS desktop.
+    (check "desktop-backend/archrepoon-does-not-lift-every-aur-name-on-that-distro"
+      (lib.elem "eww" (evalDesktopBackend {
+        nixarch.packages = { enable = true; distro = "cachyos"; };
+        nixarch.desktopBackend.enable = true;
+        nixdesktop.desktop = { enable = true; compositor = "niri"; bar = "eww"; };
+      }).nixarch.packages.aur)
+      "eww must stay in the AUR partition on cachyos -- it carries no archRepoOn entry")
 
     (check "desktop-backend/compositor-role-resolved"
       (lib.elem "niri" pacmanDefault && lib.elem "brightnessctl" pacmanDefault && lib.elem "playerctl" pacmanDefault)

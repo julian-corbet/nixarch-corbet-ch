@@ -21,7 +21,14 @@ let
   # AUR-only component left in the repo list takes the entire desktop down with it. extraPacman
   # goes through the same split -- AUR membership is a fact about the package name, and a host
   # that names an AUR package there deserves a working desktop, not a cryptic `target not found`.
-  split = roles.partitionAur (roles.packagesFor want ++ cfg.extraPacman);
+  # Threaded the host's declared distro through the split (2026-08-08): a name can be AUR-only
+  # upstream and yet ship prebuilt in a derivative's own repository, and sending such a name
+  # through an AUR helper on a box whose repos already carry it is a needless source build. See
+  # `archRepoOn` in ../lib/desktop-roles.nix. `nixarch.packages.distro` is the same option
+  # modules/base-packages.nix's own `paru` placement reads -- one declared answer, read twice,
+  # rather than a second distro surface for the desktop.
+  split = roles.partitionAur config.nixarch.packages.distro
+    (roles.packagesFor want ++ cfg.extraPacman);
 in
 {
   options.nixarch.desktopBackend = {
