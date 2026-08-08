@@ -157,11 +157,17 @@ rec {
     # Arch plane declares it (`nixscroll.install.portal.enable`) along with the `portals.conf` that
     # actually selects it (`nixscroll.portals.pin.enable`).
     #
-    # CARRYING IT WAS ACTIVELY HARMFUL, not merely redundant. With two installed backends both
-    # claiming ScreenCast and Screenshot and no portals.conf choosing between them,
-    # xdg-desktop-portal takes the first in lexicographical order — `gnome` before `wlr` — so this
-    # entry is what made screen capture fail on a wlroots host even after the correct backend was
-    # installed alongside it.
+    # IT NEVER SERVED ANYTHING HERE, which is a sharper reason to drop it than "redundant" and a
+    # duller one than "it was stealing capture". xdg-desktop-portal resolves an interface through a
+    # portals.conf, then through the deprecated `UseIn` key matched against XDG_CURRENT_DESKTOP,
+    # then through one last resort: `xdg-desktop-portal-gtk` SPECIFICALLY. A wlroots session sets no
+    # XDG_CURRENT_DESKTOP and matched no config file, so the GNOME backend was never a candidate for
+    # anything — it sat installed and inert, never even D-Bus-activated, while Screenshot and
+    # ScreenCast went unresolved and unexported because gtk implements neither.
+    #
+    # So it is dead weight, and dead weight that turns into a live wrong answer the moment anything
+    # puts `gnome` in XDG_CURRENT_DESKTOP, since gnome.portal claims both interfaces with
+    # `UseIn=gnome`. Dropping it costs nothing and closes that.
     portals = [ "xdg-desktop-portal-gtk" ];
 
     # The Arch half of nixdesktop's `browsers` capability. A fixed PAIR rather than a

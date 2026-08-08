@@ -1123,9 +1123,9 @@ let
       "pacman: ${builtins.toJSON pacmanDefault}")
 
     # The GNOME portal backend must NOT come back. It implements Screenshot and ScreenCast against
-    # Mutter, and `gnome` sorts before `wlr`, so on a wlroots host carrying both and no portals.conf
-    # to choose between them it silently wins both interfaces and serves them against a compositor
-    # that is not running. See lib/desktop-roles.nix's `portals` entry.
+    # Mutter, which is not running on the compositors this role table serves, and its `UseIn=gnome`
+    # makes it a candidate for both the moment anything puts `gnome` in XDG_CURRENT_DESKTOP. See
+    # lib/desktop-roles.nix's `portals` entry.
     (check "desktop-backend/no-gnome-portal-backend"
       (!(lib.elem "xdg-desktop-portal-gnome" pacmanDefault))
       "pacman: ${builtins.toJSON pacmanDefault}")
