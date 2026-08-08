@@ -387,6 +387,30 @@ rec {
     # In the AUR only UPSTREAM -- but see `archRepoOn` immediately below, which lifts it back into
     # the pacman transaction on a derivative whose own repository ships a prebuilt one.
     "czkawka-gui"
+
+    # `char-white` -- an icon theme, and the one name in this list that is NOT in the AUR either.
+    # Verified 2026-08-08 the three-source way modules/base-packages.nix documents: `pacman -Si`
+    # resolves `Repository : cachyos` on both live hosts -- that derivative's OWN repository, not
+    # one of its `*-v3` rebuilds of an Arch one; archlinux.org's package search returns ZERO; and
+    # the AUR RPC returns zero for both an exact `info` query and a `search`. Upstream Arch has no
+    # source for it at all, which is the same shape as the six CachyOS repository packages in
+    # modules/base-packages.nix.
+    #
+    # SO WHY IS IT IN A LIST CALLED `aurOnly`? Because of what this list MECHANICALLY means, which
+    # is narrower than its name: it is what `partitionAur` below holds OUT of the pacman half. That
+    # is the only correct answer for a name plain Arch cannot resolve, and the reason is the one
+    # this list's own header gives -- `pacman -S` aborts the ENTIRE transaction on one unknown
+    # target, taking every other declared package on the host down with it, while an AUR helper
+    # handed a name it cannot find fails on that name alone and installs the rest. One of those two
+    # failures is recoverable and the other is a box that cannot converge at all. `archRepoOn`
+    # immediately below then lifts it back into the pacman half on the distro that genuinely
+    # carries it, which is where every real consumer of it is.
+    #
+    # The name is left as it is rather than generalised: `czkawka-gui` above really is AUR-only
+    # upstream, this one is nowhere upstream, and both want the same treatment -- so a rename would
+    # buy accuracy on one entry at the cost of churning a field two other repos' catalogues mirror.
+    # Stating the difference on the entry is cheaper and does not move anything.
+    "char-white"
   ];
 
   # ── Names that are AUR-only UPSTREAM but repo-carried on a derivative ────────────────────────
@@ -407,8 +431,29 @@ rec {
   # derivative's OWN repository, not one of its `*-v3` rebuilds of an Arch one; archlinux.org's
   # package search returns ZERO results, so upstream Arch packages it nowhere; the AUR RPC returns
   # one, which is where a plain Arch host gets it.
+  # `char-white`, verified the same three ways and in the same session, differs from czkawka-gui in
+  # one respect that does not change the mechanism: the AUR does not carry it either (see its own
+  # entry in `aurOnly` above). It is a CachyOS icon theme -- `/usr/share/icons/char-white/`, an
+  # ordinary freedesktop theme directory with an `index.theme`, which is why nixdesktop reaches it
+  # through `iconThemes` and not through any role table here. `Groups : cachyos`, `Architecture :
+  # any`, built from github.com/CachyOS/char-white.
+  #
+  # THE NEAR MISS THAT BELONGS IN NEITHER LIST, recorded here because it arrives through the same
+  # option and a careless application of the same method would put it in both. `breeze-icons` is
+  # the other icon theme the family's Arch hosts declare, and `pacman -Si` on a CachyOS box answers
+  # `Repository : cachyos-extra-v3` FIRST -- which reads like a derivative repository and is not
+  # one. It is that derivative's `x86_64_v3` REBUILD of Arch's own `extra` package: same upstream,
+  # same version, same name, recompiled for a newer baseline, and `pacman -Si` goes on to print the
+  # `extra` entry immediately below it. archlinux.org resolves it, so the plain-Arch floor is
+  # already right and there is nothing to lift. Adding it here would be actively wrong in the
+  # expensive direction -- an `aurOnly` entry to lift FROM would first have to be invented, and
+  # that entry would hold a perfectly resolvable package out of every plain-Arch host's pacman
+  # transaction and hand it to an AUR helper that would try to BUILD KDE Frameworks from source.
+  # The rule the two real entries share is what the first line of this block says: a name belongs
+  # here only when upstream Arch has NO source for it, never merely because a derivative also
+  # ships a copy.
   archRepoOn = {
-    cachyos = [ "czkawka-gui" ];
+    cachyos = [ "czkawka-gui" "char-white" ];
   };
 
   # Partition a resolved package list into what `pacman -S` can take and what needs an AUR helper.
@@ -451,6 +496,12 @@ rec {
       ++ resolve inputRemappers (want.input or null)
       ++ lib.optionals (want.launcher or null != null) [ want.launcher ]
       ++ lib.optionals (want.terminal or null != null) [ want.terminal ]
+      # Icon themes: free-form names passed through, exactly like `launcher`/`terminal` above and
+      # `extraComponents` below -- nixdesktop names no theme, so there is no table to look one up
+      # in. They still go through `partitionAur` in ../modules/desktop-backend.nix like every other
+      # name here, which is what lets a theme that only one derivative's repository carries be
+      # handled correctly rather than aborting a plain Arch host's whole pacman transaction.
+      ++ (want.iconThemes or [ ])
       ++ lib.concatLists (lib.mapAttrsToList
         (name: pkgs: lib.optionals (want.${name} or false) pkgs)
         capabilities)

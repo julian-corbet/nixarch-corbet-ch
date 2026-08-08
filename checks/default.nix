@@ -946,6 +946,30 @@ let
     nixdesktop.desktop = { enable = true; compositor = "niri"; inputAutomation = true; };
   };
 
+  # `iconThemes` -- free-form names with NO table entry, so these fixtures prove two separate
+  # things at once: that the pass-through reaches the reconciler at all, and that a name in
+  # `archRepoOn` is still partitioned correctly when it arrives that way rather than out of a role
+  # table.
+  #
+  # THE PAIR IS DELIBERATE, AND BOTH HALVES ARE REAL NAMES rather than one real name and a filler.
+  # They are the two shapes an icon theme comes in, and a fixture carrying only one of them would
+  # prove only half the partition. `char-white` is nowhere on upstream Arch and in CachyOS's own
+  # repository, so it must be held out of the plain-Arch pacman list and lifted back on the
+  # derivative. `breeze-icons` is an ordinary `extra` package on upstream Arch (and a `*-v3` rebuild
+  # of that same package on CachyOS, which is not a different source and needs no entry anywhere),
+  # so it must pass straight through on BOTH distros and must never acquire a special case just by
+  # travelling next to a name that has one.
+  desktopIconsArch = evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; iconThemes = [ "char-white" "breeze-icons" ]; };
+  };
+  desktopIconsCachyos = evalDesktopBackend {
+    nixarch.packages = { enable = true; distro = "cachyos"; };
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; iconThemes = [ "char-white" "breeze-icons" ]; };
+  };
+
   # Gated on a nixdesktop checkout being reachable. nixarch deliberately does NOT take nixdesktop
   # as a flake input -- the family contract's R4 is that modules couple by option value, never by
   # dependency edge, and this backend reads `nixdesktop.want` precisely so no edge is needed. That
@@ -1051,6 +1075,40 @@ let
         && !lib.elem "wtype" desktopAutomation.nixarch.packages.pacman
         && !lib.elem "keyd" desktopAutomation.nixarch.packages.pacman)
       "typing: ${builtins.toJSON desktopTyping.nixarch.packages.pacman}, automation: ${builtins.toJSON desktopAutomation.nixarch.packages.pacman}")
+
+    # Icon themes, which reach this backend through `resolve`'s free-form path rather than a table.
+    # An empty list must produce nothing at all -- the default every existing consumer evaluates.
+    (check "desktop-backend/icon-themes-unfilled-installs-nothing"
+      (!lib.elem "char-white" pacmanDefault && !lib.elem "char-white" desktopDefault.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON pacmanDefault}, aur: ${builtins.toJSON desktopDefault.nixarch.packages.aur}")
+
+    # An ordinary theme name passes straight through to the pacman half on both distros: nothing
+    # about being an icon theme routes a name anywhere special, and nothing about sharing a list
+    # with a derivative-only name rubs off on it either. `breeze-icons` is in upstream `extra`, so
+    # the plain-Arch floor is already correct for it and there is nothing for `archRepoOn` to lift.
+    (check "desktop-backend/icon-themes-pass-through-to-the-reconciler"
+      (lib.elem "breeze-icons" desktopIconsArch.nixarch.packages.pacman
+        && lib.elem "breeze-icons" desktopIconsCachyos.nixarch.packages.pacman
+        && !lib.elem "breeze-icons" desktopIconsArch.nixarch.packages.aur
+        && !lib.elem "breeze-icons" desktopIconsCachyos.nixarch.packages.aur)
+      "arch pacman: ${builtins.toJSON desktopIconsArch.nixarch.packages.pacman}")
+
+    # THE FATAL DIRECTION for this option. `char-white` exists in no upstream Arch repository and
+    # in no AUR package either, so on the plain-Arch floor it must be held OUT of the pacman list:
+    # one unresolvable target there aborts the entire transaction and takes every other declared
+    # package down with it, where an AUR helper handed a name it cannot find fails on that name
+    # alone. This is what `aurOnly` buys for a name that is not, literally, in the AUR.
+    (check "desktop-backend/cachyos-only-icon-theme-stays-out-of-the-plain-arch-pacman-list"
+      (!lib.elem "char-white" desktopIconsArch.nixarch.packages.pacman
+        && lib.elem "char-white" desktopIconsArch.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON desktopIconsArch.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopIconsArch.nixarch.packages.aur}")
+
+    # ...and the lift puts it back where it actually lives on the distro that carries it, without
+    # leaving a copy in `aur` for the helper to rebuild.
+    (check "desktop-backend/cachyos-only-icon-theme-lifts-to-pacman-on-cachyos"
+      (lib.elem "char-white" desktopIconsCachyos.nixarch.packages.pacman
+        && !lib.elem "char-white" desktopIconsCachyos.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON desktopIconsCachyos.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopIconsCachyos.nixarch.packages.aur}")
 
     (check "desktop-backend/compositor-role-resolved"
       (lib.elem "niri" pacmanDefault && lib.elem "brightnessctl" pacmanDefault && lib.elem "playerctl" pacmanDefault)
