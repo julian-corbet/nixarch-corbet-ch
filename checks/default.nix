@@ -184,6 +184,31 @@ let
   # unreachable -- `pkgsDeclared` already covers `aur = [ "yay" ]` with no `aurUser` set.
   noAurUserText = pkgsDeclared.nixarch.packages.reconcileScript.text;
 
+  # The generated reconcile script under each `syncDbPolicy`, read the same static-text way the
+  # AUR-isolation checks above read theirs. `syncDbPolicy` selects between three quite different
+  # scripts at EVAL time (the module renders only the branch a host chose), so "what does the
+  # default actually do" and "does any policy smuggle in a bare `pacman -Sy`" are both questions
+  # about text, answerable here without a build and without an Arch box.
+  syncPolicyText = policy: extra: (evalPackages {
+    nixarch.packages = {
+      enable = true;
+      pacman = [ "git" ];
+      aur = [ "yay" ];
+      aurUser = "julian";
+      syncDbPolicy = policy;
+    } // extra;
+  }).nixarch.packages.reconcileScript.text;
+
+  requireFreshText = syncPolicyText "require-fresh" { };
+  fullUpgradeText = syncPolicyText "full-upgrade" { };
+  ignoreText = syncPolicyText "ignore" { };
+  customMaxAgeText = syncPolicyText "require-fresh" { syncDbMaxAge = 3600; };
+
+  # Just the operator-facing abort, from the first word of the message to the `exit 1` that ends
+  # the block -- so an assertion about what the message SAYS cannot be satisfied by the comment
+  # that explains it. See `infixBetween`.
+  staleAbortMessage =
+    infixBetween "ABORTING -- pacman's sync databases are" "exit 1" requireFreshText;
 
   packagesChecks = [
     (check "packages/pacman-declared-round-trips"
@@ -362,15 +387,111 @@ let
         && lib.hasInfix "aurUser is null" noAurUserText)
       "reconcileScript.text (no aurUser) unexpectedly contains AUR-fallback logic")
 
-    # Scope check, not a regression net for step 1 itself: official-repo packages stay a bare,
-    # un-isolated single command, unlike AUR -- the repo IS the source, signed and mirrored by
-    # pacman, so it doesn't share AUR's exposure to a vendor rotating a pinned checksum URL out
-    # from under a stale PKGBUILD (see this step's header comment). If step 1 ever grows the same
-    # isolation, this check should change WITH it, deliberately, not by silent drift.
-    (check "packages/pacman-step-unchanged-bare-single-command"
+    # Step 1 covers the whole declared repository list in ONE pacman transaction -- unlike AUR, it
+    # is not split per package: the repo IS the source, signed and mirrored by pacman, so it does
+    # not share AUR's exposure to a vendor rotating a pinned checksum URL out from under a stale
+    # PKGBUILD (see that step's header comment). What it IS now is `if`-guarded rather than bare,
+    # so a failure can be diagnosed before it kills the script -- see the sync-database checks
+    # below for what that diagnosis has to say.
+    (check "packages/pacman-step-is-one-transaction-for-the-whole-list"
       (lib.hasInfix ''pacman -S --needed --noconfirm "''${assume_args[@]}" "''${pacman_pkgs[@]}"'' aurWithUserText
-        && !(lib.hasInfix ''if pacman -S --needed'' aurWithUserText))
-      "reconcileScript.text: step 1 (official-repo packages) no longer matches the expected bare, un-isolated shape")
+        && !(lib.hasInfix "for pkg in \"\${pacman_pkgs" aurWithUserText))
+      "reconcileScript.text: step 1 (official-repo packages) no longer resolves the declared list in a single transaction")
+
+    (check "packages/pacman-step-failure-is-if-guarded-not-bare"
+      (lib.hasInfix ''if pacman -S --needed --noconfirm'' aurWithUserText)
+      "reconcileScript.text: step 1 is not `if`-guarded, so a failing pacman kills the script before anything can name the cause")
+
+    # ── the sync database: a cache this reconciler used to trust without ever validating it ──
+    # A database days old names package file VERSIONS mirrors no longer carry, so every mirror
+    # 404s on a name nothing in the output connects back to the database. These checks pin the
+    # three things that keep that from being a mystery again: a policy surface, a pre-flight gate
+    # that only fires when a fetch would actually happen, and a post-failure diagnosis that runs
+    # on EVERY policy.
+
+    (check "packages/sync-db-policy-defaults-to-require-fresh"
+      (pkgsDefault.nixarch.packages.syncDbPolicy == "require-fresh")
+      "got: ${builtins.toJSON pkgsDefault.nixarch.packages.syncDbPolicy}")
+
+    (check "packages/sync-db-max-age-defaults-to-48h"
+      (pkgsDefault.nixarch.packages.syncDbMaxAge == 172800)
+      "got: ${builtins.toJSON pkgsDefault.nixarch.packages.syncDbMaxAge}")
+
+    # THE ONE THAT MUST NEVER GO GREEN BY ACCIDENT. `pacman -Sy` followed by installing is Arch's
+    # partial upgrade: new packages resolved against refreshed metadata, old libraries on disk,
+    # breakage that surfaces at runtime as missing shared objects rather than here. Whatever this
+    # module does about staleness, a bare `-Sy` is never it -- so the generated script is checked
+    # for the literal, under every policy, not just the default one.
+    (check "packages/reconcile-never-runs-a-bare-Sy"
+      (lib.all (t: !(lib.hasInfix "pacman -Sy " t) && !(lib.hasInfix "pacman -Sy\n" t))
+        [ requireFreshText fullUpgradeText ignoreText ])
+      "reconcileScript.text contains a bare `pacman -Sy` under at least one syncDbPolicy -- that is the partial-upgrade footgun, see nixarch.packages.syncDbPolicy")
+
+    # The gate is deliberately conditional on something actually being MISSING: `pacman -S
+    # --needed` over an already-installed set contacts no mirror, and that is the steady-state
+    # reconcile on every activation and every boot. A gate that fired there would fail runs that
+    # were never going to fail.
+    (check "packages/require-fresh-gates-only-when-a-package-is-missing"
+      (lib.hasInfix "missing=$(pacman -T --" requireFreshText
+        && lib.hasInfix ''if [ -n "$missing" ]; then'' requireFreshText)
+      "reconcileScript.text (require-fresh): the freshness gate is not conditional on `pacman -T` reporting an unsatisfied package")
+
+    (check "packages/require-fresh-aborts-before-installing"
+      (let
+        gateIdx = firstInfixIndex "ABORTING -- pacman's sync databases are" requireFreshText;
+        installIdx = firstInfixIndex "pacman -S --needed --noconfirm" requireFreshText;
+      in gateIdx != null && installIdx != null && gateIdx < installIdx)
+      "reconcileScript.text (require-fresh): the staleness abort does not precede the install -- it has to run BEFORE pacman touches a mirror, not after")
+
+    # Scoped to the abort MESSAGE, not the whole script: the script's own comments explain the same
+    # thing in the same words, so an unscoped `hasInfix` would stay green with the operator-facing
+    # sentences deleted. See `infixBetween`.
+    (check "packages/require-fresh-abort-names-staleness-and-the-fix"
+      (let m = staleAbortMessage; in
+        lib.hasInfix "mirrors no longer carry" m
+        && lib.hasInfix "404" m
+        && lib.hasInfix "pacman -Syu" m
+        && lib.hasInfix "partial upgrade" m
+        && lib.hasInfix "syncDbMaxAge" m)
+      "the staleness abort message does not name stale metadata, the 404 symptom, the `pacman -Syu` fix, the `-Sy` trap and the knob. got: ${builtins.toJSON staleAbortMessage}")
+
+    (check "packages/require-fresh-threads-the-configured-max-age"
+      (lib.hasInfix "-gt 3600" customMaxAgeText && !(lib.hasInfix "-gt 172800" customMaxAgeText))
+      "reconcileScript.text: syncDbMaxAge = 3600 did not reach the generated comparison")
+
+    (check "packages/full-upgrade-runs-syu-and-says-so"
+      (lib.hasInfix "pacman -Syu --noconfirm" fullUpgradeText
+        && lib.hasInfix "FULL SYSTEM UPGRADE" fullUpgradeText)
+      "reconcileScript.text (full-upgrade): no `pacman -Syu --noconfirm`, or it does not announce itself as a full system upgrade")
+
+    # Positive control for the two above: the default policy must NOT quietly upgrade the box.
+    (check "packages/require-fresh-never-upgrades-the-host"
+      (!(lib.hasInfix "pacman -Syu --noconfirm" requireFreshText))
+      "reconcileScript.text (require-fresh): the default policy runs a full system upgrade, which it must never do")
+
+    (check "packages/ignore-drops-the-gate-but-keeps-the-diagnosis"
+      (!(lib.hasInfix "ABORTING -- pacman's sync databases are" ignoreText)
+        && lib.hasInfix "If the errors above are 404s" ignoreText)
+      "reconcileScript.text (ignore): expected no pre-flight gate but a retained post-failure diagnosis")
+
+    # The layer that can never false-alarm: whatever the policy, a failed repository transaction
+    # reports how old the databases actually are. The threshold above is a heuristic; this is not.
+    (check "packages/install-failure-reports-the-database-age-on-every-policy"
+      (lib.all (t: lib.hasInfix "If the errors above are 404s" t && lib.hasInfix "newest .db under" t)
+        [ requireFreshText fullUpgradeText ignoreText ])
+      "reconcileScript.text: a failed step-1 transaction does not report the sync-database age under every syncDbPolicy")
+
+    (check "packages/install-failure-fails-the-unit"
+      (lib.hasInfix "WARNING pacman -S FAILED" requireFreshText
+        && lib.hasInfix "reconcile_failed=1" requireFreshText)
+      "reconcileScript.text: a failed step-1 transaction is not tracked into the non-zero exit at step 5")
+
+    # The age is read from pacman's own DBPath, and from the NEWEST database. A quiet repository
+    # can go days without a revision, so taking the oldest would report every host as stale.
+    (check "packages/database-age-comes-from-pacman-conf-dbpath"
+      (lib.hasInfix "pacman-conf DBPath" requireFreshText
+        && lib.hasInfix "newest_sync_db_mtime" requireFreshText)
+      "reconcileScript.text: the database age is not read from pacman's own DBPath via a newest-mtime helper")
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════

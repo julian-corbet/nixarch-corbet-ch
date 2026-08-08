@@ -44,6 +44,16 @@
 # rather than an accidental inheritance. That is documentation, not a package
 # list; see studies/ for a worked example.
 #
+# THE SYNC DATABASE IS A CACHE, AND THIS RECONCILER USED TO TRUST IT BLINDLY. Everything below
+# resolves package names through pacman's sync databases, and nothing here ever refreshed them or
+# so much as asked how old they were. A database that is days old names package files at versions
+# mirrors no longer carry, so `pacman -S` 404s from every mirror in turn with an error that never
+# mentions the database — it reads like a broken mirror or a bad package. `syncDbPolicy` is the
+# answer: a host states what this reconciler may do about database freshness, the default refuses
+# to install against a database it can prove is stale, and a failed install always reports the
+# database's age so the cause is named rather than guessed at. No policy runs a bare `pacman -Sy`;
+# see that option's own doc for why the obvious repair is the partial-upgrade footgun.
+#
 # PRUNING IS OPT-IN AND DANGEROUS: `pruneUndeclared` actually removes
 # packages (`pacman -Rns`) that are explicitly installed but not in your
 # declared lists. pacman has no concept of "this was here before your
@@ -158,6 +168,38 @@ let
     # Arch-family box this module targets is well past that.
     assume_args=(${lib.escapeShellArgs (lib.concatMap (p: [ "--assume-installed" p ]) cfg.assumeInstalled)})
 
+    # Age of pacman's SYNC DATABASES, in epoch seconds of the newest one. Defined
+    # unconditionally: the freshness gate below is policy-dependent, but the failure diagnosis in
+    # step 1 uses this on every policy, including "ignore".
+    #
+    # WHY THE MTIME IS THE RIGHT SIGNAL. pacman stamps each downloaded `.db` with the REMOTE
+    # file's Last-Modified time rather than the moment of download -- that is how `-Sy` decides
+    # whether to re-fetch at all. So this measures how old the database CONTENT is, which is
+    # exactly the thing that decides whether the package file names inside it still exist on a
+    # mirror. Verified on a live CachyOS box: `extra.db` carried an mtime hours old while the
+    # local package DB directory had been written minutes earlier.
+    #
+    # NEWEST across all repositories, not oldest: a quiet repository can legitimately go days
+    # without a new revision, and taking its mtime would report every box as stale. [extra] and
+    # its derivative equivalents move several times a day, so the newest is the honest reading of
+    # "when did this host last hear from its mirrors".
+    #
+    # DBPath is configurable, so it is read from pacman itself rather than hard-coded; the
+    # fallback is pacman's own default for the case where `pacman-conf` is somehow absent.
+    sync_db_dir=$(pacman-conf DBPath 2>/dev/null || true)
+    [ -n "$sync_db_dir" ] || sync_db_dir=/var/lib/pacman/
+    sync_db_dir="''${sync_db_dir%/}/sync"
+
+    newest_sync_db_mtime() {
+      local newest="" db m
+      for db in "$sync_db_dir"/*.db; do
+        [ -e "$db" ] || continue
+        m=$(stat -c %Y "$db")
+        if [ -z "$newest" ] || [ "$m" -gt "$newest" ]; then newest="$m"; fi
+      done
+      printf '%s' "$newest"
+    }
+
     # --- 0. distro mismatch detector (always runs -- NOT gated behind either prune flag) -----
     # `distro` is DECLARED, never probed at eval time -- that option's own doc already explains
     # why: this module is evaluated wherever the flake is built, not necessarily the machine it
@@ -185,10 +227,101 @@ let
       '')
       distroSignature)}
 
+    # --- 0b. sync-database freshness gate (see nixarch.packages.syncDbPolicy) ----------------
+    # THE FAILURE THIS EXISTS FOR. pacman resolves a package to a FILE NAME carrying an exact
+    # version, and mirrors keep only the current build of each package. A sync database that is
+    # days old therefore names files that no longer exist anywhere, and `pacman -S` fails with
+    #   error: failed retrieving file 'foo-1.2.3-1-x86_64.pkg.tar.zst' ... The requested URL
+    #   returned error: 404
+    #   error: failed to commit transaction (unexpected error)
+    # from every mirror in turn. Nothing in that output mentions the database; it reads like a
+    # broken mirror or a bad package, and it is neither. Observed on a host whose databases were
+    # four to seven days old.
+    #
+    # WHY NOT JUST `-Sy`. Refreshing the databases and then installing is Arch's textbook PARTIAL
+    # UPGRADE: the new package is built against the libraries in the refreshed database, the ones
+    # on disk are older, and the mismatch surfaces as missing shared objects at runtime rather
+    # than as an error here. There is no case where a bare `-Sy` is the right thing for a
+    # reconciler to do behind an operator's back, so this module does not offer it as a policy at
+    # all -- `full-upgrade` covers everything `-Sy` could, safely.
+    #
+    # RUNS BEFORE EVERY OTHER STEP AND ABORTS THE WHOLE RECONCILE. Every step below consults the
+    # sync database -- `-S` resolves through it, the AUR helper resolves its repository
+    # dependencies through it, `expand_keep` reads groups out of it with `-Sqg`. Converging
+    # against a database this script has just proved is lying is the exact defect it is here to
+    # stop, so it stops.
+    ${
+      if cfg.syncDbPolicy == "ignore" then ''
+        echo "nixarch-packages: syncDbPolicy = ignore -- not checking how old pacman's sync databases are. A 404 on a .pkg.tar.zst below is the likely consequence; step 1 still says so if it happens."
+      ''
+      else if cfg.syncDbPolicy == "full-upgrade" then ''
+        # The declared, opt-in form of "make the databases fresh". It is `-Syu`, never `-Sy`,
+        # because only the full upgrade leaves the box in a state where installing a new package
+        # is safe. Say plainly in the log what it is about to do: on a workstation this can pull
+        # a kernel, a Mesa or a libc bump, which is a much larger action than "converge the
+        # declared list" and should never be a surprise in a journal.
+        echo "nixarch-packages: syncDbPolicy = full-upgrade -- running \`pacman -Syu\` before converging. This is a FULL SYSTEM UPGRADE of this host, not a database refresh, and it can include kernel/graphics/libc updates."
+        pacman -Syu --noconfirm
+      ''
+      else ''
+        # Gate only when something actually has to be FETCHED. `pacman -S --needed` over a set
+        # that is already installed never contacts a mirror at all, so database age cannot hurt
+        # it -- and the steady-state reconcile, on every activation and every boot, is exactly
+        # that case. A gate that fired there would fail runs that were never going to fail, and a
+        # guard that cries wolf gets switched off.
+        want_pkgs=("''${pacman_pkgs[@]}" "''${aur_pkgs[@]}")
+        missing=""
+        if [ ''${#want_pkgs[@]} -gt 0 ]; then
+          # `pacman -T` is the deptest primitive: it prints the arguments NOT satisfied by an
+          # installed package, and exits non-zero when there are any -- so the `|| true` is
+          # load-bearing under `set -e`. It resolves `provides`, which a plain `pacman -Qq` diff
+          # would miss. It does NOT understand group names, so a group declared in `pacman` always
+          # reads as missing; the worst that costs is a gate firing on a stale database and
+          # telling an operator to run `pacman -Syu`, which is never wrong advice.
+          missing=$(pacman -T -- "''${want_pkgs[@]}" 2>/dev/null || true)
+        fi
+
+        if [ -n "$missing" ]; then
+          db_mtime=$(newest_sync_db_mtime)
+          if [ -z "$db_mtime" ]; then
+            echo "nixarch-packages: ABORTING -- there are no sync databases under $sync_db_dir at all, and ''${#want_pkgs[@]} declared package(s) still have to be fetched. pacman cannot resolve anything in this state. Run \`pacman -Syu\` on this host by hand, then re-run activation." >&2
+            exit 1
+          fi
+          db_age=$(( $(date +%s) - db_mtime ))
+          if [ "$db_age" -gt ${toString cfg.syncDbMaxAge} ]; then
+            echo "nixarch-packages: ABORTING -- pacman's sync databases are $((db_age / 86400)) day(s) / ''${db_age}s old, past nixarch.packages.syncDbMaxAge = ${toString cfg.syncDbMaxAge}s, and these declared package(s) are not installed yet, so this reconcile would have to fetch from a mirror:" >&2
+            printf 'nixarch-packages:   %s\n' $missing >&2
+            echo "nixarch-packages: A stale database names package FILE VERSIONS that mirrors no longer carry -- mirrors keep only the current build. Installing from it fails with a 404 on a .pkg.tar.zst from EVERY mirror in turn, which reads like a broken mirror or a bad package and is neither. This gate exists so that cause is named instead of guessed at." >&2
+            echo "nixarch-packages: FIX: run a full system upgrade on this host by hand -- \`pacman -Syu\` -- then re-run activation. Do NOT run a bare \`pacman -Sy\`: refreshing the databases without upgrading is Arch's classic partial upgrade, and it leaves newly installed packages linked against libraries this box does not have." >&2
+            echo "nixarch-packages: Knobs, if this host wants a different answer: nixarch.packages.syncDbMaxAge widens the window; syncDbPolicy = \"full-upgrade\" makes this reconciler run \`pacman -Syu\` itself on every activation; syncDbPolicy = \"ignore\" removes the check." >&2
+            exit 1
+          fi
+        fi
+      ''
+    }
+
     # --- 1. official-repo packages -----------------------------------------
     if [ ''${#pacman_pkgs[@]} -gt 0 ]; then
       echo "nixarch-packages: pacman -S --needed -> ''${pacman_pkgs[*]}"
-      pacman -S --needed --noconfirm "''${assume_args[@]}" "''${pacman_pkgs[@]}"
+      # `if`-guarded rather than bare for the same `set -e` carve-out step 2 relies on, and for
+      # the same reason: the bare form kills the script with pacman's own output as the last word,
+      # and pacman's own word for a stale database is a 404 on a file name. The database age is
+      # the single fact that turns that into a diagnosis, and it is only worth printing once the
+      # transaction has actually failed -- so it is printed here rather than guessed at by
+      # tightening the gate above.
+      if pacman -S --needed --noconfirm "''${assume_args[@]}" "''${pacman_pkgs[@]}"; then
+        :
+      else
+        echo "nixarch-packages: WARNING pacman -S FAILED for the declared repository set -> ''${pacman_pkgs[*]}" >&2
+        db_mtime=$(newest_sync_db_mtime)
+        if [ -n "$db_mtime" ]; then
+          db_age=$(( $(date +%s) - db_mtime ))
+          echo "nixarch-packages: pacman's sync databases are $((db_age / 86400)) day(s) / ''${db_age}s old (newest .db under $sync_db_dir). If the errors above are 404s on .pkg.tar.zst files, THAT is the cause and not the mirrors: a stale database names versions mirrors no longer carry. Run \`pacman -Syu\` on this host by hand -- never a bare \`pacman -Sy\`, which leaves a partial upgrade -- then re-run activation. See nixarch.packages.syncDbPolicy." >&2
+        else
+          echo "nixarch-packages: there are no sync databases under $sync_db_dir at all, which is enough on its own to explain the failure above. Run \`pacman -Syu\` on this host by hand." >&2
+        fi
+        reconcile_failed=1
+      fi
     fi
 
     # --- 2. AUR packages -----------------------------------------------------
@@ -335,15 +468,15 @@ let
       done
     ''}
 
-    # --- 5. surface a partial AUR failure (step 2) as a failed unit ----------
-    # Step 2 above ISOLATES a failing AUR package so the rest of the declared
-    # set still converges — but isolating the failure must not also HIDE it.
+    # --- 5. surface a partial install failure (steps 1 and 2) as a failed unit ----------
+    # Steps 1 and 2 above both keep going after a failure so the rest of the
+    # declared set still converges — but continuing must not also HIDE it.
     # A reconcile that silently reports success while one package never
     # installed is worse than no isolation at all: nothing short of reading
     # the journal by hand would ever reveal that `zoom` is still missing. This
     # runs LAST, after both prune steps, on purpose — pruning is independent
-    # of whether every AUR package installed (it diffs the DECLARED lists
-    # against what pacman thinks is installed, not against step 2's outcome)
+    # of whether every declared package installed (it diffs the DECLARED lists
+    # against what pacman thinks is installed, not against steps 1/2's outcome)
     # and a single reconcile should still converge everything it safely can in
     # one run rather than stopping short over one unrelated package. Only once
     # that is done does this exit non-zero, which is what actually makes the
@@ -433,6 +566,83 @@ in
         package. pacman has no per-package form of the flag, so a virtual entry
         declared for one package is visible to every other package resolved in
         the same run. Keep the list minimal for that reason.
+      '';
+    };
+
+    syncDbPolicy = lib.mkOption {
+      type = lib.types.enum [ "require-fresh" "full-upgrade" "ignore" ];
+      default = "require-fresh";
+      example = "full-upgrade";
+      description = ''
+        What this reconciler does about the age of pacman's SYNC DATABASES — the cache it
+        resolves every package name through, and the one input it used to trust without ever
+        looking at.
+
+        THE FAILURE THIS OPTION EXISTS FOR. pacman resolves a name to a file with an exact
+        version in it, and mirrors keep only the current build of each package. A database that
+        is days old therefore names files that no longer exist anywhere, and installing from it
+        fails with `The requested URL returned error: 404` on a `.pkg.tar.zst`, from every mirror
+        in turn. Nothing in that output mentions the database. It reads like a broken mirror or a
+        bad package and is neither.
+
+        WHY THIS IS A POLICY AND NOT A FIX APPLIED SILENTLY. The obvious repair — refresh the
+        databases first — is `pacman -Sy`, and `-Sy` followed by installing is Arch's textbook
+        PARTIAL UPGRADE: the new package is resolved against refreshed metadata while the
+        libraries on disk are still the old ones, and the mismatch surfaces later as missing
+        shared objects rather than as an error at install time. The only refresh that is not a
+        partial upgrade is `pacman -Syu`, and a full system upgrade on every activation is a far
+        larger and more surprising action than "converge the declared list" — on a workstation it
+        can carry a kernel, a Mesa or a libc bump. Neither answer is right for every host, so
+        every host states its own, and no bare `-Sy` is offered at all: it is strictly worse than
+        `full-upgrade` in every situation where it would appear to help.
+
+        `"require-fresh"` (default) — touch nothing, but refuse to converge against a database
+        this host can prove is lying. Before installing, the reconciler asks whether any declared
+        package is actually MISSING: if the whole set is already installed, `pacman -S --needed`
+        contacts no mirror at all and the database's age cannot matter, so nothing is checked and
+        nothing fails. That is the steady-state reconcile on every activation and every boot, and
+        keeping it quiet is deliberate — a gate that fires on runs that were never going to fail
+        gets switched off. Only when something genuinely has to be fetched is the newest sync
+        database's age compared against `syncDbMaxAge`, and a stale one aborts the reconcile with
+        a message naming staleness as the cause and `pacman -Syu` as the operator's fix.
+
+        `"full-upgrade"` — the reconciler runs `pacman -Syu --noconfirm` itself before converging.
+        Honest about what it is: a full system upgrade of this host on every activation, logged
+        as such. Reasonable on a server or a container that is expected to track the rolling
+        release anyway; think hard before setting it on a machine whose graphics stack or kernel
+        you would rather bump deliberately.
+
+        `"ignore"` — no age check at all. For a host where something else owns database freshness
+        and is known to have run recently, or a container resolving against a database the host
+        maintains. The failure diagnosis in step 1 still reports the database's age when an
+        install fails, on every policy including this one — the mystery 404 does not come back.
+      '';
+    };
+
+    syncDbMaxAge = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 172800;
+      example = 86400;
+      description = ''
+        How old pacman's newest sync database may be, in seconds, before `syncDbPolicy =
+        "require-fresh"` refuses to install a package that is not present yet. Ignored by the
+        other two policies.
+
+        Default 172800 (48 hours). There is no age below which a 404 is impossible — a package
+        rebuilt an hour ago already invalidates the file name an hour-old database carries — so
+        this is a threshold, not a proof, and it trades false alarms against mystery 404s. Two
+        days is where that trade sits for a rolling release whose main repositories are rebuilt
+        several times a day: long enough that a box which is simply not upgraded daily converges
+        without complaint, short enough to catch the week-old database that produced the incident
+        this gate was written for.
+
+        Measured from the mtime of the newest `*.db` under pacman's own `DBPath`. pacman stamps
+        those with the REMOTE file's Last-Modified time rather than the moment of download, so
+        this is the age of the database's CONTENT — which is exactly what decides whether the
+        versions it names still exist on a mirror — and not the age of the last `-Sy`.
+
+        Raising it does not make a stale database safe; it only moves where this host draws the
+        line between "probably fine" and "stop and say so".
       '';
     };
 

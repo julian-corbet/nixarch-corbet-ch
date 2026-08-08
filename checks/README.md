@@ -56,6 +56,22 @@ it. Stubbing it would only prove that this module writes the options it writes.
   render the script, run it under stubbed `pacman`/`paru`/`runuser` with one package made to fail,
   confirm the others still install and the process exits non-zero.
 
+  The same static-text treatment covers the **sync-database policy** (`syncDbPolicy`), which
+  selects between three quite different scripts at eval time. Pinned: the default is
+  `"require-fresh"` and never upgrades the host; `"full-upgrade"` really does render
+  `pacman -Syu --noconfirm` and announces itself; **no policy renders a bare `pacman -Sy`**, which
+  is the partial-upgrade footgun and the reflex fix this module deliberately does not offer; the
+  freshness gate is conditional on `pacman -T` reporting something actually missing, and lands
+  *before* the install rather than after it (an order, checked with offsets, not just presence);
+  the configured `syncDbMaxAge` reaches the generated comparison; and a failed transaction reports
+  the database age under every policy, so the mystery 404 stays named. Assertions about what a
+  *message* says are scoped to that message via `infixBetween` — these scripts carry their own
+  reasoning as comments, and an unscoped `hasInfix` stays green after the operator-facing sentence
+  is deleted because the comment above it still says the words. The runtime side was checked the
+  same way as the AUR step: render the script, run it under a stubbed `pacman` with a deliberately
+  old sync directory, confirm it aborts *before* `pacman -S` on a stale database with something to
+  fetch, stays quiet on a stale database with nothing to fetch, and names the database age when a
+  stubbed 404 comes back.
 - **`base-packages`** — `reflector`, `rebuild-detector`, `arch-install-scripts`, `base` and
   `base-devel` land in `pacman` regardless of `nixarch.packages.distro` (the same answer on every
   Arch-family host); `paru` is the one name that splits on it — `aur` on the default `"arch"`
