@@ -383,14 +383,45 @@ in
         as `name=version` (pacman's `--assume-installed`). Applied to both the
         `pacman` and the `aur` transaction.
 
-        This exists for the case where a dependency is genuinely present but
-        cannot be a package *here*: the canonical one is a container whose
-        kernel belongs to the host. A DisplayLink dock needs the `evdi` kernel
-        module, so its userspace package depends on `evdi` — but inside an LXC
-        that module is loaded by the HOST, and the guest has neither kernel
-        headers nor `CAP_SYS_MODULE`. Without this, pacman resolves the
-        dependency the only way it knows and drags a DKMS package into a
-        container that can neither build nor load it.
+        TWO CASES ARE LEGITIMATE. They look alike at the point of use — one
+        `name=version` string either way — but they go stale for completely
+        different reasons, so it matters which one you are in.
+
+        CASE 1 — the dependency is genuinely present but cannot be a package
+        *here*. The canonical one is a container whose kernel belongs to the
+        host. A DisplayLink dock needs the `evdi` kernel module, so its
+        userspace package depends on `evdi` — but inside an LXC that module is
+        loaded by the HOST, and the guest has neither kernel headers nor
+        `CAP_SYS_MODULE`. Without this, pacman resolves the dependency the only
+        way it knows and drags a DKMS package into a container that can neither
+        build nor load it.
+
+        CASE 2 — the PACKAGER's declared dependency is stricter than the
+        software's actual requirement, and the actual requirement is verifiably
+        met. The shape that forces the issue: an interpreted CLI whose package
+        pins a specific LTS runtime, where that runtime package `Conflicts
+        With` the newer runtime the host already has. pacman then cannot
+        satisfy the declared set at all — it does not skip the one package, it
+        refuses to prepare the transaction — so a single over-specified
+        dependency takes every other declared package on the box down with it.
+        Naming the strict dependency here lets the real, looser requirement
+        stand. Only correct against EVIDENCE that the program runs on what the
+        host actually has (run it; check its interpreter lookup; find a sibling
+        host already living that way), never against the assumption that it
+        probably would.
+
+        HOW THE TWO FAIL, which is what decides how often to re-check them.
+        Case 1 holds for as long as the environment keeps providing the thing
+        outside pacman's view, and it breaks when that stops — the host's own
+        configuration is where the answer changes, and it changes visibly.
+        Case 2 is VERSION-SPECIFIC: it holds only while the current version's
+        real requirement stays looser than its declared one, and it breaks
+        SILENTLY the day a new version genuinely starts needing the stricter
+        dependency — pacman will install that version without complaint,
+        because this option told it the requirement was met. So re-verify a
+        case-2 entry on upgrade, and record the evidence that established it
+        next to the declaration, so the re-check is a repeat of a known test
+        rather than a re-derivation from scratch.
 
         ⚠ This is a DEPENDENCY OVERRIDE, so it is only ever correct when you
         know the dependency is satisfied by something outside pacman's view.
