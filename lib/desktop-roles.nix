@@ -158,6 +158,19 @@ rec {
     # two are different programs, not two names for one.
     browsers = [ "firefox" "chromium" ];
 
+    # BOTH application-indicator libraries. See nixdesktop's own `appIndicators` option for the
+    # full account; the short version is that they ship different sonames
+    # (`libappindicator3.so.1` vs `libayatana-appindicator3.so.1`), so they are not substitutes
+    # and a desktop carrying only the fork loses the tray for everything still asking for the
+    # original name.
+    #
+    # BOTH ARE OFFICIAL-REPO, verified 2026-08-08 the three-source way modules/base-packages.nix
+    # documents: `pacman -Si` resolves each in an official repository (`extra` upstream; the fork
+    # is served as a `cachyos-extra-v3` rebuild on a v3 host, which is a rebuild of the Arch repo
+    # rather than a derivative-only package), archlinux.org returns one result in `extra` for each,
+    # and the AUR RPC returns zero for both. So neither belongs in `aurOnly` below.
+    appIndicators = [ "libappindicator" "libayatana-appindicator" ];
+
     # A graphical duplicate/waste finder. The GUI has its OWN package name here -- the project
     # also ships a headless `czkawka-cli`, which is a separate package and deliberately not
     # declared: a terminal-first tool belongs to whichever repo owns the terminal, not to the

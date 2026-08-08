@@ -766,6 +766,12 @@ let
   # the resolution unproven, and the two halves fail in opposite directions -- a missed lift only
   # costs a needless source build, while a WRONG lift puts an unresolvable name in the pacman list
   # and kills the whole desktop transaction.
+  pacmanAppIndicators = (evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; appIndicators = true; };
+  }).nixarch.packages.pacman;
+
   desktopDupArch = evalDesktopBackend {
     nixarch.packages.enable = true;
     nixarch.desktopBackend.enable = true;
@@ -805,6 +811,20 @@ let
     (check "desktop-backend/input-role-does-not-reach-the-aur-partition"
       (!lib.elem "keyd" desktopInputKeyd.nixarch.packages.aur)
       "aur: ${builtins.toJSON desktopInputKeyd.nixarch.packages.aur}")
+
+    # BOTH indicator libraries, never one. They ship different sonames, so a regression that
+    # dropped the legacy half would look like a tidy-up and silently cost the tray for every
+    # consumer still asking for the original name -- with no error anywhere, since these are
+    # dlopened rather than linked.
+    (check "desktop-backend/app-indicators-resolves-to-both-libraries"
+      (lib.elem "libappindicator" pacmanAppIndicators
+        && lib.elem "libayatana-appindicator" pacmanAppIndicators)
+      "pacman: ${builtins.toJSON pacmanAppIndicators}")
+
+    (check "desktop-backend/app-indicators-unfilled-installs-neither"
+      (!lib.elem "libappindicator" pacmanDefault
+        && !lib.elem "libayatana-appindicator" pacmanDefault)
+      "pacman: ${builtins.toJSON pacmanDefault}")
 
     (check "desktop-backend/duplicate-finder-unfilled-installs-nothing"
       (!lib.elem "czkawka-gui" pacmanDefault
