@@ -142,10 +142,27 @@ rec {
     screenshots = [ "grim" "slurp" ];
     clipboardHistory = [ "cliphist" "wl-clipboard" ];
     idleAndLock = [ "swayidle" "swaylock" ];
-    # niri declares a hard dependency on xdg-desktop-portal-impl, so SOME portal backend is
-    # mandatory. gtk is the general-purpose fallback; gnome supplies the screencast portal that
-    # gtk's does not, which is what screen sharing actually needs on wlroots-adjacent stacks.
-    portals = [ "xdg-desktop-portal-gnome" "xdg-desktop-portal-gtk" ];
+    # THE GENERAL BACKEND ONLY. Most Wayland compositors declare a hard dependency on some
+    # `xdg-desktop-portal-impl`, so one general-purpose backend is close to mandatory, and gtk is
+    # it: file chooser, settings, print, "open with".
+    #
+    # NO GNOME BACKEND, and the reason it used to be here is worth keeping because it is a plausible
+    # mistake to make twice. It was added to supply the screencast portal that gtk's does not — true
+    # as far as it goes, and the wrong package for it on every compositor this role table serves.
+    # `xdg-desktop-portal-gnome` implements Screenshot and ScreenCast against Mutter's own D-Bus
+    # API, so on a wlroots session it answers with a backend that cannot do the job. The right one
+    # is `xdg-desktop-portal-wlr`, which speaks `wlr-screencopy`/`wlr-export-dmabuf`, and it is
+    # deliberately NOT here: it is meaningless without a wlroots compositor, so it belongs to
+    # whichever module owns that compositor rather than to a general desktop capability. nixscroll's
+    # Arch plane declares it (`nixscroll.install.portal.enable`) along with the `portals.conf` that
+    # actually selects it (`nixscroll.portals.pin.enable`).
+    #
+    # CARRYING IT WAS ACTIVELY HARMFUL, not merely redundant. With two installed backends both
+    # claiming ScreenCast and Screenshot and no portals.conf choosing between them,
+    # xdg-desktop-portal takes the first in lexicographical order — `gnome` before `wlr` — so this
+    # entry is what made screen capture fail on a wlroots host even after the correct backend was
+    # installed alongside it.
+    portals = [ "xdg-desktop-portal-gtk" ];
 
     # The Arch half of nixdesktop's `browsers` capability. A fixed PAIR rather than a
     # single-choice role like fileManager or polkitAgent: a desktop routinely wants both at once
