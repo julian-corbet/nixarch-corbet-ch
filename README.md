@@ -54,7 +54,9 @@ a toy demo or marketing page. As of this writing:
     `foreign-service` (declarative config over pacman systemd units),
     `gcroot-guard` (catches the activated-but-unregistered generation),
     `desktop-backend` (resolves nixdesktop roles into Arch packages),
-    and `shelly` (nixarch's own opinionated package: a graphical pacman/AUR front-end).
+    `shelly` (nixarch's own opinionated package: a graphical pacman/AUR front-end),
+    and `cachyos-tools` (CachyOS's own update notifier, welcome app, kernel GUI and
+    package installer, four independent `enable`s, distro-gated).
   - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle),
     `dev` (git config and direnv/nix-direnv integration), and `desktop`
     (Arch spawn commands for nixdesktop's session components).
@@ -382,6 +384,39 @@ is invisible to that declaration and will read as undeclared drift the moment
 `pruneUndeclared`/`pruneOrphans` is turned on — deliberate, not an oversight; the declared
 lists remain the source of truth for what a box is supposed to have.
 
+### cachyos-tools
+
+CachyOS ships operator tooling of its own that has nothing to do with any domain: an update
+notifier and applier (`cachy-update`, which also brings a tray applet and a systemd *user*
+timer), a welcome/onboarding app (`cachyos-hello`), a kernel GUI (`cachyos-kernel-manager`)
+and a curated graphical package installer (`cachyos-packageinstaller`, binary `cachyos-pi`).
+Four independent `enable` options, all off by default:
+
+```nix
+{
+  imports = [
+    inputs.nixarch.systemManagerModules.packages
+    inputs.nixarch.systemManagerModules.cachyos-tools
+  ];
+
+  nixarch.packages.enable = true;
+  nixarch.packages.distro = "cachyos";
+  nixarch.cachyosTools.cachyUpdate.enable = true;
+}
+```
+
+**Distro-gated, and that is a correctness requirement rather than a nicety.** None of these
+four names exists in upstream Arch or in the AUR — they live only in CachyOS's own
+repositories. `pacman -S` aborts the *entire* transaction on a single unknown target, so one
+of these names on a plain Arch host would fail every other declared package alongside it.
+Each definition is therefore gated on `nixarch.packages.distro == "cachyos"`, and an
+enabled-but-wrong-distro host gets an assertion rather than a silent no-op.
+
+**Caution:** `cachy-update` and `cachyos-packageinstaller` are both, like Shelly above, an
+imperative path to pacman on a box whose package set is otherwise reconciled from Nix. That
+is workable — a GUI installer is a fine way to *evaluate* a package before committing to a
+declaration — but only while the declaration actually follows.
+
 ### Full example
 
 See [`examples/system-manager.nix`](examples/system-manager.nix) for a minimal,
@@ -413,7 +448,7 @@ Arch/CachyOS machines.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, foreign-service, gcroot-guard, desktop-backend, shelly), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
+| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, base-packages, foreign-service, logrotate, gcroot-guard, desktop-backend, shelly, cachyos-tools), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
 | `lib/` | Pure data shared across module classes — `desktop-roles.nix` (Arch resolution tables for nixdesktop roles) and `host-path.nix` (the host PATH every unit driving pacman/nix needs). |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |

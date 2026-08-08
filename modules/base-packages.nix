@@ -72,6 +72,91 @@
     # possible at all — including, on a plain Arch host, `paru` itself below.
     "base-devel"
   ]
+
+  # ── CachyOS's own repository layer ────────────────────────────────────────────────────────────
+  #
+  # WHAT THESE ARE, AS ONE THING: the machinery that makes a CachyOS box able to fetch, verify and
+  # rank packages from CachyOS's own repositories, plus the pacman hooks that repository expects to
+  # be running. Every one of them manages the Arch host itself rather than any domain — the same
+  # test the five entries above pass — so they are declared HERE and published into the sink from
+  # the inside, exactly as this file's own header describes.
+  #
+  # THE DISTRO GATE IS CORRECTNESS, NOT AN OPTIMISATION. Verified three ways per name (2026-08-08,
+  # the method this file's header already documents): `pacman -Si` on BOTH live CachyOS hosts
+  # reports `Repository : cachyos` — CachyOS's OWN repository, not one of its `*-v3` rebuilds of an
+  # Arch one; archlinux.org's package search returns ZERO results for every one of them; the AUR
+  # RPC returns zero as well. So unlike `paru` below — AUR-only upstream, and therefore installable
+  # on a plain Arch box through a different channel — these six have no upstream existence AT ALL.
+  # There is no fallback to route them through. A plain-Arch host that saw one of these names in
+  # its `pacman` list would abort the ENTIRE reconcile transaction on "target not found" and take
+  # every other declared package down with it (modules/packages.nix's own header on why an
+  # unresolvable name in the `pacman` list is the fatal direction). `nixarch.packages.distro` is
+  # the gate that stops that, and it is the same underlying gate `paru` below already reads —
+  # nixarch deliberately does not carry nixagent's/nixmsg's/nixgames's `archRepoOn` catalogue
+  # field, for the reason spelled out in `paru`'s own comment: this repo has no catalogue to hang
+  # such a field on, and the gate those repos ultimately resolve against is this one.
+  #
+  # DECLARING IS NOT KEEPING, and both are wanted. modules/packages.nix's `distroCriticalKeep`
+  # already floor-lists `cachyos-keyring`, `cachyos-mirrorlist`, the two microarchitecture
+  # mirrorlists and `cachyos-hooks` so prune can never REMOVE them. That says nothing about a box
+  # converging toward this module's declared set never having had them INSTALLED in the first
+  # place — precisely the distinction the `base` entry above already draws for the Arch floor.
+  # `cachyos-rate-mirrors` is deliberately absent from that floor (packages.nix explains why: it
+  # ranks mirrors, it is not a precondition for the package manager working at all) and is declared
+  # here regardless, because these are two different questions about the same package.
+  ++ lib.optionals (config.nixarch.packages.distro == "cachyos") [
+    # The GPG trust root. pacman verifies every package coming out of a `[cachyos*]` repository
+    # against the keys this package installs; without it those repositories are unusable, which is
+    # why it is also this distro's entry in `distroCriticalKeep`.
+    "cachyos-keyring"
+
+    # The base `[cachyos]`/`[cachyos-extra]`/`[cachyos-core]` mirror list. ADDITIVE to Arch's own
+    # `pacman-mirrorlist`, never a replacement — `[core]`, `[extra]` and `[multilib]` still resolve
+    # through `/etc/pacman.d/mirrorlist` on a CachyOS box. Both lists are load-bearing.
+    "cachyos-mirrorlist"
+
+    # The x86-64-v3 and x86-64-v4 microarchitecture repository lists. These two are why a CachyOS
+    # host gets optimised binaries at all: `[cachyos-v3]`/`[cachyos-extra-v3]`/`[cachyos-core-v3]` (and
+    # the v4 set) are rebuilds of the upstream Arch repos against a newer instruction-set baseline,
+    # and a host resolves most of its packages through them rather than through plain `[extra]` —
+    # visible in `pacman -Si` output as `Repository : cachyos-extra-v3` on ordinary Arch packages.
+    "cachyos-v3-mirrorlist"
+    "cachyos-v4-mirrorlist"
+
+    # `rate-mirrors` — benchmarks the mirrors in the lists above and rewrites them in speed order.
+    #
+    # IT SHIPS AN ENABLED TIMER, AND THAT IS WORTH KNOWING. `cachyos-rate-mirrors.timer` is
+    # `enabled` on both hosts this is declared for, against a vendor preset of `disabled` — so
+    # something enabled it once and it has been re-ranking ever since. The consequence is honest
+    # and small but real: mirror ORDER on these boxes is machine-chosen, on a schedule, not
+    # declared anywhere. Nothing here disables it; recording it is the point, so the next reader
+    # finds a mirrorlist that does not match any file in this repo and knows why.
+    #
+    # The same shape as `reflector` above, one distro layer down — and note infra's own deliberate
+    # counter-decision there: reflector's timer is left UNWIRED because it rewrites
+    # `/etc/pacman.d/mirrorlist`, a file no repo owns. This timer was already on before either
+    # decision existed; it is being written down, not switched on.
+    "cachyos-rate-mirrors"
+
+    # `cachyos-hooks` — three unrelated things in one package, and the first is load-bearing.
+    #
+    # 1. `/usr/bin/update-initramfs` plus `cachyos-plymouth-initramfs.hook`, a libalpm hook that
+    #    regenerates the initramfs when a kernel or a driver package changes. On a btrfs host with
+    #    snapper and a DECLARED kernel this is what keeps the declared kernel bootable: an
+    #    initramfs that silently fails to regenerate after a kernel update is a host that does not
+    #    come back up. Note the two-writer shape plainly — a consumer may pin its kernel packages
+    #    declaratively (nixboot does exactly this) while this pacman hook is what actually rebuilds
+    #    the initramfs for them. The two cooperate here rather than conflict, but a reader should
+    #    be able to see both writers without discovering the second one the hard way.
+    # 2. `cachyos-reboot-required.hook` — drops a marker when an update wants a reboot.
+    # 3. `os-release.hook` and `lsb-release.hook`, which REWRITE `/etc/os-release` and
+    #    `/etc/lsb-release` with CachyOS branding. Worth stating outright: anything that keys off
+    #    distro identity by reading those files is reading something this package maintains. (Not
+    #    `nixarch.packages.distro` — that is declared, never probed, for the reason its own option
+    #    doc gives; this note is for everything else on the box that is not so careful.)
+    "cachyos-hooks"
+  ]
+
   # `paru` — nixarch's OWN reconciler shells out to it (modules/packages.nix, `aurHelper` defaults
   # to `"paru"`), so leaving it undeclared meant this repo depended on a binary it never named —
   # closing that is the point. But UNLIKE the four packages above, `paru` is not the same answer

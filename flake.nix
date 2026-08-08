@@ -66,6 +66,13 @@
         # Shelly, a graphical package manager (pacman/AUR GUI front-end) — nixarch's own
         # opinionated package, not a domain repo's; see modules/shelly.nix for the mechanism.
         shelly = ./modules/shelly.nix;
+
+        # CachyOS's own operator tooling — the update notifier, the welcome app, the kernel GUI
+        # and the package-installer GUI. Four independent `enable` options, all off by default,
+        # all additionally gated on `nixarch.packages.distro == "cachyos"` because none of these
+        # four exists in upstream Arch or the AUR at all. Same shelly-shaped mechanism (a name
+        # into `nixarch.packages.pacman`, nothing else); see modules/cachyos-tools.nix.
+        cachyos-tools = ./modules/cachyos-tools.nix;
       };
       nixosModules = {
         # NixOS realises users with the same userborn as system-manager and

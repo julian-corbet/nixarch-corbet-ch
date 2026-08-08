@@ -387,6 +387,36 @@ let
         && !(lib.elem "paru" basePkgsCachyos.nixarch.packages.aur))
       "pacman: ${builtins.toJSON basePkgsCachyos.nixarch.packages.pacman}, aur: ${builtins.toJSON basePkgsCachyos.nixarch.packages.aur}")
 
+    # ── The CachyOS repository layer (2026-08-08) ────────────────────────────────────────────
+    #
+    # BOTH DIRECTIONS MATTER, and the absent one matters more. These six names exist ONLY in
+    # CachyOS's own repositories -- zero results on archlinux.org, zero on the AUR RPC -- so on a
+    # plain Arch host they are not "a package from the wrong channel", they are an unknown target,
+    # and `pacman -S` aborts the ENTIRE transaction on one of those. A regression that leaked any
+    # of them onto the arch floor would therefore break every OTHER declared package on that host
+    # too, which is exactly the failure this module's `distro` gate exists to make impossible.
+    (check "base-packages/cachyos-repo-layer-absent-on-plain-arch-floor"
+      (builtins.all (p: !(lib.elem p basePkgsArchDefault.nixarch.packages.pacman))
+        [ "cachyos-keyring" "cachyos-mirrorlist" "cachyos-v3-mirrorlist" "cachyos-v4-mirrorlist"
+          "cachyos-rate-mirrors" "cachyos-hooks" ])
+      "pacman: ${builtins.toJSON basePkgsArchDefault.nixarch.packages.pacman}")
+
+    # ... and never smuggled into `aur` as a "safe" fallback either: there is no AUR package by
+    # any of these names, so an AUR helper would fail on them just as hard, only later and per
+    # package instead of up front.
+    (check "base-packages/cachyos-repo-layer-never-lands-in-aur"
+      (builtins.all (p: !(lib.elem p (basePkgsArchDefault.nixarch.packages.aur
+        ++ basePkgsCachyos.nixarch.packages.aur)))
+        [ "cachyos-keyring" "cachyos-mirrorlist" "cachyos-v3-mirrorlist" "cachyos-v4-mirrorlist"
+          "cachyos-rate-mirrors" "cachyos-hooks" ])
+      "arch aur: ${builtins.toJSON basePkgsArchDefault.nixarch.packages.aur}, cachyos aur: ${builtins.toJSON basePkgsCachyos.nixarch.packages.aur}")
+
+    (check "base-packages/cachyos-repo-layer-present-on-cachyos-floor"
+      (builtins.all (p: lib.elem p basePkgsCachyos.nixarch.packages.pacman)
+        [ "cachyos-keyring" "cachyos-mirrorlist" "cachyos-v3-mirrorlist" "cachyos-v4-mirrorlist"
+          "cachyos-rate-mirrors" "cachyos-hooks" ])
+      "pacman: ${builtins.toJSON basePkgsCachyos.nixarch.packages.pacman}")
+
     # The uniform four stay in `pacman` on the cachyos floor too -- the split is scoped to `paru`
     # alone, not a wholesale re-evaluation of the rest of this module's list.
     (check "base-packages/uniform-names-unaffected-by-distro"
@@ -1037,6 +1067,87 @@ let
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # cachyos-tools (modules/cachyos-tools.nix) -- four independently-switchable CachyOS-only
+  # packages. The properties that matter are INDEPENDENCE (no option drags in another) and the
+  # DISTRO GATE (none of these names exists in upstream Arch or the AUR, so leaking one onto a
+  # non-CachyOS host would abort that host's whole pacman transaction, not merely install the
+  # wrong thing). Both distro answers are exercised, for the same reason nixmsg's own
+  # archRepoOn suite gives: testing one would leave half the resolution unproven.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  evalCachyosTools = extraConfig:
+    evalMod [ ../modules/cachyos-tools.nix ../modules/packages.nix extraConfig ];
+
+  cachyToolsDefault = evalCachyosTools { nixarch.packages.distro = "cachyos"; };
+  cachyToolsAll = evalCachyosTools {
+    nixarch.packages.distro = "cachyos";
+    nixarch.cachyosTools = {
+      cachyUpdate.enable = true;
+      cachyosHello.enable = true;
+      cachyosKernelManager.enable = true;
+      cachyosPackageinstaller.enable = true;
+    };
+  };
+  cachyToolsOnlyUpdate = evalCachyosTools {
+    nixarch.packages.distro = "cachyos";
+    nixarch.cachyosTools.cachyUpdate.enable = true;
+  };
+  # Enabled on the plain-Arch floor: the package must NOT be emitted, and the assertion must fire.
+  cachyToolsWrongDistro = evalCachyosTools {
+    nixarch.cachyosTools.cachyosHello.enable = true;
+  };
+  cachyToolsWithHostList = evalCachyosTools {
+    nixarch.packages.distro = "cachyos";
+    nixarch.cachyosTools.cachyUpdate.enable = true;
+    nixarch.packages.pacman = [ "git" ];
+  };
+
+  cachyosToolsChecks = [
+    (check "cachyos-tools/all-four-disabled-by-default"
+      (cachyToolsDefault.nixarch.packages.pacman == [ ])
+      "got: ${builtins.toJSON cachyToolsDefault.nixarch.packages.pacman}")
+
+    (check "cachyos-tools/every-option-enabled-yields-every-package"
+      (builtins.all (p: lib.elem p cachyToolsAll.nixarch.packages.pacman)
+        [ "cachy-update" "cachyos-hello" "cachyos-kernel-manager" "cachyos-packageinstaller" ])
+      "got: ${builtins.toJSON cachyToolsAll.nixarch.packages.pacman}")
+
+    # INDEPENDENCE -- the property that makes four options meaningfully four rather than one
+    # lumped toggle wearing four names. Enabling the update notifier must bring nothing else.
+    (check "cachyos-tools/each-option-is-independent-of-the-others"
+      (cachyToolsOnlyUpdate.nixarch.packages.pacman == [ "cachy-update" ])
+      "got: ${builtins.toJSON cachyToolsOnlyUpdate.nixarch.packages.pacman}")
+
+    # THE GATE. An enabled option on a non-CachyOS distro emits no package name -- the direction
+    # that cannot abort a reconcile.
+    (check "cachyos-tools/enabled-on-plain-arch-emits-no-package"
+      (cachyToolsWrongDistro.nixarch.packages.pacman == [ ])
+      "got: ${builtins.toJSON cachyToolsWrongDistro.nixarch.packages.pacman}")
+
+    # ... and does not silently pretend to have worked: a suppressed package with no diagnostic
+    # reads as "the option did nothing", when the truth is "this package cannot exist here".
+    (check "cachyos-tools/enabled-on-plain-arch-fails-an-assertion"
+      (lib.any (a: !a.assertion) cachyToolsWrongDistro.assertions)
+      "assertions: ${builtins.toJSON (map (a: a.assertion) cachyToolsWrongDistro.assertions)}")
+
+    # ... while a correctly-declared CachyOS host raises none.
+    (check "cachyos-tools/no-assertion-fires-on-a-cachyos-host"
+      (builtins.all (a: a.assertion) cachyToolsAll.assertions)
+      "assertions: ${builtins.toJSON (map (a: a.assertion) cachyToolsAll.assertions)}")
+
+    # None of these four is an AUR package -- there is no AUR entry by any of these names, so a
+    # wrong split would fail just as hard, only later.
+    (check "cachyos-tools/nothing-lands-in-aur"
+      (cachyToolsAll.nixarch.packages.aur == [ ])
+      "got: ${builtins.toJSON cachyToolsAll.nixarch.packages.aur}")
+
+    (check "cachyos-tools/concatenates-with-a-consumers-own-pacman-list"
+      (lib.elem "cachy-update" cachyToolsWithHostList.nixarch.packages.pacman
+        && lib.elem "git" cachyToolsWithHostList.nixarch.packages.pacman)
+      "got: ${builtins.toJSON cachyToolsWithHostList.nixarch.packages.pacman}")
+  ];
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
   # logrotate (modules/logrotate.nix) -- package + a declaratively-enabled foreign timer +
   # /etc/logrotate.d/* drop-ins.
   # ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -1119,7 +1230,7 @@ let
 
   results = packagesChecks ++ basePackagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks
     ++ desktopBackendChecks ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks
-    ++ logrotateChecks;
+    ++ cachyosToolsChecks ++ logrotateChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 
