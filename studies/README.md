@@ -11,3 +11,4 @@ project. See the main [README](../README.md) for the project itself.
 | File | Finding |
 |---|---|
 | `distro-config-packages.md` | An Arch derivative ships packages whose payload is system CONFIG, not software — sysctls, systemd drop-ins, udev, zram. They silently supply defaults a module appears to inherit for free. Worked example: CachyOS's `cachyos-settings`, 46 files, two real incidents. |
+| `trusting-the-live-system.md` | Two production defects, one shape: an artefact built from live system state whose missing-input case yields a wrong answer instead of an error. A `timers.target.wants` link that built DANGLING (and deadlocked activation against the package reconciler), and a package converger that trusted sync databases it never validated (mystery 404s from every mirror). Why eval-time and build-time checks cannot help, and where the check belongs instead. |
