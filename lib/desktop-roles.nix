@@ -322,6 +322,36 @@ rec {
     # Arch repo rather than a derivative-only package), archlinux.org returns one result in `extra`,
     # and the AUR RPC returns zero. So it belongs in neither `aurOnly` nor `archRepoOn` below.
     syntheticTyping = [ "wtype" ];
+
+    # General input automation -- `ydotool`, "generic command-line automation tool (no X!)" in the
+    # package's own description. See nixdesktop's own `inputAutomation` option for why this is a
+    # third role rather than a second `syntheticTyping` or another value of `input`: that one is a
+    # compositor client typing TEXT through `virtual-keyboard-v1`, this writes keys, pointer
+    # motion, buttons and scroll into `uinput`, and `input` above rewrites events that already
+    # exist rather than producing any.
+    #
+    # THE PACKAGE IS MOST OF THE MECHANISM HERE, WHICH IT IS NOT ON NIXOS -- the same asymmetry
+    # `inputRemappers.keyd` above already carries, and the reason the backend indirection exists at
+    # all. Arch's package installs `/usr/bin/ydotool` AND `/usr/bin/ydotoold`, a udev rule
+    # (`80-uinput.rules`: `KERNEL=="uinput", GROUP="input", MODE="0660"`) that makes `/dev/uinput`
+    # reachable by the `input` group, and a systemd USER unit for the daemon. nixpkgs ships the two
+    # binaries and the unit file and no rule at all, which is what `programs.ydotool.enable` is for
+    # over there.
+    #
+    # WHAT IT STILL DOES NOT DO HERE: start, and grant. `ydotool.service` ships disabled, exactly
+    # like `keyd.service` above, and nothing in this table enables a vendor unit -- a consumer
+    # wanting the daemon running uses its own mechanism (../modules/foreign-service.nix is the
+    # declarative surface for precisely that class of unit). The udev rule is a GROUP grant, not a
+    # blanket one: a user outside `input` still cannot open the device, and nothing here adds
+    # anyone to that group.
+    #
+    # OFFICIAL-REPO, verified 2026-08-08 the three-source way modules/base-packages.nix documents:
+    # `pacman -Si ydotool` resolves on both live CachyOS hosts (`cachyos-extra-v3`, a rebuild of
+    # the Arch repo rather than a derivative-only package), archlinux.org returns one result in
+    # `extra`, and the AUR RPC returns zero. So it belongs in neither `aurOnly` nor `archRepoOn`
+    # below. Both platforms are on 1.0.4, both URLs resolve to github.com/ReimuNotMoe/ydotool, and
+    # the command surface agrees exactly -- `ydotool` and `ydotoold` on each.
+    inputAutomation = [ "ydotool" ];
   };
 
   # The compositor plus what its own default keybinds shell out to. niri's stock media and

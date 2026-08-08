@@ -791,6 +791,15 @@ let
     nixdesktop.desktop = { enable = true; compositor = "niri"; syntheticTyping = true; };
   };
 
+  # `inputAutomation` -- likewise official-repo, and the fixture exists for a second reason beyond
+  # the partition: this capability and `syntheticTyping` above are the two that a careless edit
+  # would merge, so each has to be shown reaching its own package and not the other's.
+  desktopAutomation = evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = { enable = true; compositor = "niri"; inputAutomation = true; };
+  };
+
   # `iconThemes` -- free-form names with NO table entry, so these fixtures prove two separate
   # things at once: that the pass-through reaches the reconciler at all, and that a name in
   # `archRepoOn` is still partitioned correctly when it arrives that way rather than out of a role
@@ -892,6 +901,25 @@ let
       (lib.elem "wtype" desktopTyping.nixarch.packages.pacman
         && !lib.elem "wtype" desktopTyping.nixarch.packages.aur)
       "pacman: ${builtins.toJSON desktopTyping.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopTyping.nixarch.packages.aur}")
+
+    # Input automation, the same two directions -- `ydotool` is official-repo too, so an AUR
+    # partition here would mean rebuilding from source what `extra` already ships.
+    (check "desktop-backend/input-automation-unfilled-installs-nothing"
+      (!lib.elem "ydotool" pacmanDefault && !lib.elem "ydotool" desktopDefault.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON pacmanDefault}, aur: ${builtins.toJSON desktopDefault.nixarch.packages.aur}")
+
+    (check "desktop-backend/input-automation-resolves-to-the-repo-package"
+      (lib.elem "ydotool" desktopAutomation.nixarch.packages.pacman
+        && !lib.elem "ydotool" desktopAutomation.nixarch.packages.aur)
+      "pacman: ${builtins.toJSON desktopAutomation.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopAutomation.nixarch.packages.aur}")
+
+    # The two capabilities that are about keys and are not each other. Each must reach its own
+    # package and neither the other's -- the assertion that catches a merge of the two roles.
+    (check "desktop-backend/input-automation-and-synthetic-typing-stay-separate"
+      (!lib.elem "ydotool" desktopTyping.nixarch.packages.pacman
+        && !lib.elem "wtype" desktopAutomation.nixarch.packages.pacman
+        && !lib.elem "keyd" desktopAutomation.nixarch.packages.pacman)
+      "typing: ${builtins.toJSON desktopTyping.nixarch.packages.pacman}, automation: ${builtins.toJSON desktopAutomation.nixarch.packages.pacman}")
 
     # Icon themes, which reach this backend through `resolve`'s free-form path rather than a table.
     # An empty list must produce nothing at all -- the default every existing consumer evaluates.
