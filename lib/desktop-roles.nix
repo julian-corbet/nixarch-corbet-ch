@@ -97,6 +97,10 @@ rec {
 
   bars = {
     waybar = [ "waybar" ];
+    # The GTK4 bar. Same repo (`extra`) and same shape as waybar here -- the difference between
+    # them is a rendering property, not a packaging one; see nixdesktop's own `bar` option for
+    # which to pick and why fractional scaling decides it.
+    ironbar = [ "ironbar" ];
     eww = [ "eww" ];
     # noctalia is installed from its own flake through home-manager, not from pacman — the
     # Arch repos carry the older Qt/QML generation, not the current rewrite. Empty on purpose,
@@ -104,7 +108,13 @@ rec {
     noctalia = [ ];
   };
 
-  notificationDaemons.mako = [ "mako" ];
+  notificationDaemons = {
+    mako = [ "mako" ];
+    # `swaync` on Arch, where the package, the binary and the config directory agree. nixpkgs is
+    # the odd one out and calls the attribute `swaynotificationcenter` -- one of the plainer
+    # illustrations of why this table is per-platform rather than shared.
+    swaync = [ "swaync" ];
+  };
 
   osds.swayosd = [ "swayosd" ];
 
