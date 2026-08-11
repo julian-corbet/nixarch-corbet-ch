@@ -39,6 +39,13 @@
         device-gids = import ./modules/device-gids.nix { inherit (nixhost.lib) probeFact; };
         packages = ./modules/packages.nix;
 
+        # Reports drift the reconcile above cannot see: a package someone installed on purpose
+        # that nothing declares (never an orphan, so never pruned, so it accumulates forever), and
+        # a command that exists in two prefixes at once where PATH order silently picks the
+        # winner. Reports only -- installs nothing, removes nothing, cannot fail an activation.
+        # Import alongside `packages`; it is gated on that module's own `enable` as well as its own.
+        packages-audit = ./modules/packages-audit.nix;
+
         # The pacman packages every nixarch host wants, unconditionally — no `enable` of its
         # own, unlike shelly below; see modules/base-packages.nix for why.
         base-packages = ./modules/base-packages.nix;
