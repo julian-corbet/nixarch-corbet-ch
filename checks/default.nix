@@ -886,6 +886,22 @@ let
   };
   pacmanExtrasOptIn = desktopExtrasOptIn.nixarch.packages.pacman;
 
+  # brightness + wallpapers, on a SCROLL host. The compositor matters: `brightnessctl` used to
+  # arrive only as a passenger on `compositors.niri`, so a niri fixture would pass while the
+  # declared role stayed unresolved. Scroll is what every real host runs now, and it carries
+  # neither package.
+  desktopBrightnessWallpapers = evalDesktopBackend {
+    nixarch.packages.enable = true;
+    nixarch.desktopBackend.enable = true;
+    nixdesktop.desktop = {
+      enable = true;
+      compositor = "scroll";
+      brightness = "brightnessctl";
+      wallpapers = [ "cachyos-wallpapers" ];
+    };
+  };
+  pacmanBrightnessWallpapers = desktopBrightnessWallpapers.nixarch.packages.pacman;
+
   desktopOo7 = evalDesktopBackend {
     nixarch.packages.enable = true;
     nixarch.desktopBackend.enable = true;
@@ -1176,6 +1192,18 @@ let
     # expectation was never updated, so the check has been failing on a table that is correct.
     # `libopenraw` is asserted for the same reason `ffmpegthumbnailer` is -- an optdepend Arch's
     # tumbler will not pull for you.
+    # Both were in nixdesktop's `want` contract from the start and this table never read them, so
+    # the declaration resolved to nothing. `brightnessctl` masked it for months by riding along on
+    # the niri compositor entry -- retiring niri (2026-08-02) is what exposed it, on hosts that had
+    # declared the role since April and would have come up with dead brightness keys on a reinstall.
+    (check "desktop-backend/brightness-resolves-without-a-compositor-carrying-it"
+      (lib.elem "brightnessctl" pacmanBrightnessWallpapers)
+      "pacman: ${builtins.toJSON pacmanBrightnessWallpapers}")
+
+    (check "desktop-backend/wallpapers-resolve-at-all"
+      (lib.elem "cachyos-wallpapers" pacmanBrightnessWallpapers)
+      "pacman: ${builtins.toJSON pacmanBrightnessWallpapers}")
+
     (check "desktop-backend/file-manager-extras-resolved-on-opt-in"
       (builtins.all (p: lib.elem p pacmanExtrasOptIn)
         [ "ffmpegthumbnailer" "libopenraw" "thunar-archive-plugin" "engrampa"

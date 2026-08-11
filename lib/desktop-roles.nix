@@ -529,6 +529,27 @@ rec {
       ++ resolve inputRemappers (want.input or null)
       ++ lib.optionals (want.launcher or null != null) [ want.launcher ]
       ++ lib.optionals (want.terminal or null != null) [ want.terminal ]
+
+      # ── brightness AND wallpapers, WHICH THIS TABLE SIMPLY DID NOT READ ───────────────────────
+      #
+      # Both have been in nixdesktop's `want` contract all along and were dropped on the floor
+      # here, so a host declaring them got the declaration and not the package. In practice that is
+      # worse than a plainly missing package, because something else supplied them for a while and
+      # then stopped:
+      #
+      #   · `brightnessctl` arrived only as a passenger on `compositors.niri` below. When niri was
+      #     retired fleet-wide (2026-08-02) and scroll took over, nothing carried it any more -- so
+      #     a box that had declared `brightness = "brightnessctl"` since April kept working purely
+      #     because the package was still installed from the niri days, while a fresh install of
+      #     the same declared config would have come up with dead brightness keys.
+      #   · `wallpapers` was never resolved by anything at all.
+      #
+      # Same passthrough shape as `launcher`/`terminal` above and `iconThemes` below, for the same
+      # reason: these option values ARE Arch package names (`brightness` is an enum of them,
+      # `wallpapers` is a list), so there is nothing to look up and a table would only add a second
+      # place to edit for an answer it could not give.
+      ++ lib.optionals (want.brightness or null != null) [ want.brightness ]
+      ++ (want.wallpapers or [ ])
       # Icon themes: free-form names passed through, exactly like `launcher`/`terminal` above and
       # `extraComponents` below -- nixdesktop names no theme, so there is no table to look one up
       # in. They still go through `partitionAur` in ../modules/desktop-backend.nix like every other
