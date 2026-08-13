@@ -44,6 +44,7 @@ let
   systemManagerSurfaceStub = { lib, ... }: {
     options = {
       systemd.services = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+      systemd.timers = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
       environment.systemPackages = lib.mkOption { type = lib.types.listOf lib.types.package; default = [ ]; };
       # Opaque, same shape as systemd.services/users.groups above -- added for modules/logrotate.nix,
       # which is the first module in this suite to touch `environment.etc`
@@ -437,22 +438,27 @@ let
       "reconcileScript.text (require-fresh): the freshness gate is not conditional on `pacman -T` reporting an unsatisfied package")
 
     (check "packages/require-fresh-aborts-before-installing"
-      (let
-        gateIdx = firstInfixIndex "ABORTING -- pacman's sync databases are" requireFreshText;
-        installIdx = firstInfixIndex "pacman -S --needed --noconfirm" requireFreshText;
-      in gateIdx != null && installIdx != null && gateIdx < installIdx)
+      (
+        let
+          gateIdx = firstInfixIndex "ABORTING -- pacman's sync databases are" requireFreshText;
+          installIdx = firstInfixIndex "pacman -S --needed --noconfirm" requireFreshText;
+        in
+        gateIdx != null && installIdx != null && gateIdx < installIdx
+      )
       "reconcileScript.text (require-fresh): the staleness abort does not precede the install -- it has to run BEFORE pacman touches a mirror, not after")
 
     # Scoped to the abort MESSAGE, not the whole script: the script's own comments explain the same
     # thing in the same words, so an unscoped `hasInfix` would stay green with the operator-facing
     # sentences deleted. See `infixBetween`.
     (check "packages/require-fresh-abort-names-staleness-and-the-fix"
-      (let m = staleAbortMessage; in
+      (
+        let m = staleAbortMessage; in
         lib.hasInfix "mirrors no longer carry" m
         && lib.hasInfix "404" m
         && lib.hasInfix "pacman -Syu" m
         && lib.hasInfix "partial upgrade" m
-        && lib.hasInfix "syncDbMaxAge" m)
+        && lib.hasInfix "syncDbMaxAge" m
+      )
       "the staleness abort message does not name stale metadata, the 404 symptom, the `pacman -Syu` fix, the `-Sy` trap and the knob. got: ${builtins.toJSON staleAbortMessage}")
 
     (check "packages/require-fresh-threads-the-configured-max-age"
@@ -492,6 +498,79 @@ let
       (lib.hasInfix "pacman-conf DBPath" requireFreshText
         && lib.hasInfix "newest_sync_db_mtime" requireFreshText)
       "reconcileScript.text: the database age is not read from pacman's own DBPath via a newest-mtime helper")
+  ];
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # packages-audit (modules/packages-audit.nix)
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  evalPackagesAudit = extraConfig: evalMod [
+    ../modules/packages.nix
+    ../modules/packages-audit.nix
+    extraConfig
+  ];
+
+  packagesAuditOn = evalPackagesAudit {
+    nixarch.packages = {
+      enable = true;
+      pacman = [ "base" "git" "bottom" ];
+      audit.enable = true;
+    };
+  };
+  packagesAuditOff = evalPackagesAudit { nixarch.packages.enable = true; };
+  packagesAuditText = packagesAuditOn.nixarch.packages.audit.script.text;
+
+  packagesAuditChecks = [
+    (check "packages-audit/unit-and-timer-exist-when-enabled"
+      (packagesAuditOn.systemd.services ? "nixarch-packages-audit"
+        && packagesAuditOn.systemd.timers ? "nixarch-packages-audit")
+      "service keys: ${builtins.toJSON (builtins.attrNames packagesAuditOn.systemd.services)}, timer keys: ${builtins.toJSON (builtins.attrNames packagesAuditOn.systemd.timers)}")
+
+    (check "packages-audit/disabled-is-a-genuine-no-op"
+      (!(packagesAuditOff.systemd.services ? "nixarch-packages-audit")
+        && !(packagesAuditOff.systemd.timers ? "nixarch-packages-audit"))
+      "service keys: ${builtins.toJSON (builtins.attrNames packagesAuditOff.systemd.services)}, timer keys: ${builtins.toJSON (builtins.attrNames packagesAuditOff.systemd.timers)}")
+
+    # A report must never again become a dependency of system-manager.target. On a measured live
+    # machine the old per-package query took 97 minutes; system-manager waits only 30 seconds for
+    # target jobs, so wiring the report into multi-user.target made every activation time out.
+    (check "packages-audit/service-is-not-activation-wanted"
+      ((packagesAuditOn.systemd.services.nixarch-packages-audit.wantedBy or [ ]) == [ ])
+      "service wantedBy: ${builtins.toJSON (packagesAuditOn.systemd.services.nixarch-packages-audit.wantedBy or null)}")
+
+    (check "packages-audit/timer-not-activation-target-owns-scheduling"
+      ((packagesAuditOn.systemd.timers.nixarch-packages-audit.wantedBy or [ ]) == [ "timers.target" ])
+      "timer wantedBy: ${builtins.toJSON (packagesAuditOn.systemd.timers.nixarch-packages-audit.wantedBy or null)}")
+
+    (check "packages-audit/timer-defers-and-repeats-the-report"
+      (
+        let t = packagesAuditOn.systemd.timers.nixarch-packages-audit.timerConfig or { }; in
+        (t.OnActiveSec or null) == "5min"
+        && (t.OnUnitActiveSec or null) == "1d"
+        && (t.RandomizedDelaySec or null) == "5min"
+        && (t.Unit or null) == "nixarch-packages-audit.service"
+      )
+      "timerConfig: ${builtins.toJSON (packagesAuditOn.systemd.timers.nixarch-packages-audit.timerConfig or null)}")
+
+    (check "packages-audit/service-has-a-finite-runtime"
+      ((packagesAuditOn.systemd.services.nixarch-packages-audit.serviceConfig.TimeoutStartSec or null) == "10min")
+      "TimeoutStartSec: ${builtins.toJSON (packagesAuditOn.systemd.services.nixarch-packages-audit.serviceConfig.TimeoutStartSec or null)}")
+
+    (check "packages-audit/service-does-not-remain-active-after-reporting"
+      (!((packagesAuditOn.systemd.services.nixarch-packages-audit.serviceConfig or { }) ? RemainAfterExit))
+      "serviceConfig: ${builtins.toJSON (packagesAuditOn.systemd.services.nixarch-packages-audit.serviceConfig or null)}")
+
+    # Group membership is a database-wide index. Query it once, then select the declared group
+    # rows locally; never fork one pacman process for every ordinary declared package again.
+    (check "packages-audit/group-expansion-is-one-batched-query"
+      (lib.hasInfix ''group_rows=$(pacman -Sgg 2>/dev/null || true)'' packagesAuditText
+        && !(lib.hasInfix "members=$(pacman -Sgq" packagesAuditText))
+      "audit script does not use the single-query group-index shape")
+
+    (check "packages-audit/execstart-is-the-checked-script"
+      (packagesAuditOn.systemd.services.nixarch-packages-audit.serviceConfig.ExecStart
+        == "${packagesAuditOn.nixarch.packages.audit.script}")
+      "ExecStart: ${builtins.toJSON (packagesAuditOn.systemd.services.nixarch-packages-audit.serviceConfig.ExecStart or null)}")
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -543,24 +622,43 @@ let
     # too, which is exactly the failure this module's `distro` gate exists to make impossible.
     (check "base-packages/cachyos-repo-layer-absent-on-plain-arch-floor"
       (builtins.all (p: !(lib.elem p basePkgsArchDefault.nixarch.packages.pacman))
-        [ "cachyos-keyring" "cachyos-mirrorlist" "cachyos-v3-mirrorlist" "cachyos-v4-mirrorlist"
-          "cachyos-rate-mirrors" "cachyos-hooks" ])
+        [
+          "cachyos-keyring"
+          "cachyos-mirrorlist"
+          "cachyos-v3-mirrorlist"
+          "cachyos-v4-mirrorlist"
+          "cachyos-rate-mirrors"
+          "cachyos-hooks"
+        ])
       "pacman: ${builtins.toJSON basePkgsArchDefault.nixarch.packages.pacman}")
 
     # ... and never smuggled into `aur` as a "safe" fallback either: there is no AUR package by
     # any of these names, so an AUR helper would fail on them just as hard, only later and per
     # package instead of up front.
     (check "base-packages/cachyos-repo-layer-never-lands-in-aur"
-      (builtins.all (p: !(lib.elem p (basePkgsArchDefault.nixarch.packages.aur
-        ++ basePkgsCachyos.nixarch.packages.aur)))
-        [ "cachyos-keyring" "cachyos-mirrorlist" "cachyos-v3-mirrorlist" "cachyos-v4-mirrorlist"
-          "cachyos-rate-mirrors" "cachyos-hooks" ])
+      (builtins.all
+        (p: !(lib.elem p (basePkgsArchDefault.nixarch.packages.aur
+          ++ basePkgsCachyos.nixarch.packages.aur)))
+        [
+          "cachyos-keyring"
+          "cachyos-mirrorlist"
+          "cachyos-v3-mirrorlist"
+          "cachyos-v4-mirrorlist"
+          "cachyos-rate-mirrors"
+          "cachyos-hooks"
+        ])
       "arch aur: ${builtins.toJSON basePkgsArchDefault.nixarch.packages.aur}, cachyos aur: ${builtins.toJSON basePkgsCachyos.nixarch.packages.aur}")
 
     (check "base-packages/cachyos-repo-layer-present-on-cachyos-floor"
       (builtins.all (p: lib.elem p basePkgsCachyos.nixarch.packages.pacman)
-        [ "cachyos-keyring" "cachyos-mirrorlist" "cachyos-v3-mirrorlist" "cachyos-v4-mirrorlist"
-          "cachyos-rate-mirrors" "cachyos-hooks" ])
+        [
+          "cachyos-keyring"
+          "cachyos-mirrorlist"
+          "cachyos-v3-mirrorlist"
+          "cachyos-v4-mirrorlist"
+          "cachyos-rate-mirrors"
+          "cachyos-hooks"
+        ])
       "pacman: ${builtins.toJSON basePkgsCachyos.nixarch.packages.pacman}")
 
     # The uniform four stay in `pacman` on the cachyos floor too -- the split is scoped to `paru`
@@ -696,13 +794,17 @@ let
       "systemd.services keys: ${builtins.toJSON (builtins.attrNames gidsWithTty.systemd.services)}")
 
     (check "device-gids/devpts-execstart-carries-tty-gid-and-defaults"
-      (let execStart = gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or [ ];
-       in lib.any (l: lib.hasInfix "gid=5,mode=620,ptmxmode=666" l) execStart)
+      (
+        let execStart = gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or [ ];
+        in lib.any (l: lib.hasInfix "gid=5,mode=620,ptmxmode=666" l) execStart
+      )
       "ExecStart: ${builtins.toJSON (gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or null)}")
 
     (check "device-gids/devpts-chgrp-step-is-tolerant"
-      (let execStart = gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or [ ];
-       in lib.any (l: lib.hasPrefix "-" l && lib.hasInfix "chgrp" l) execStart)
+      (
+        let execStart = gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or [ ];
+        in lib.any (l: lib.hasPrefix "-" l && lib.hasInfix "chgrp" l) execStart
+      )
       "ExecStart: ${builtins.toJSON (gidsWithTty.systemd.services.devpts-gid.serviceConfig.ExecStart or null)}")
 
     # THE property this whole default exists for: a host that names no map of its own
@@ -773,8 +875,10 @@ let
       "systemd.services keys: ${builtins.toJSON (builtins.attrNames gshadowEnabled.systemd.services)}")
 
     (check "gshadow-sync/unit-wanted-by-multi-user-and-shadow-service"
-      (let w = gshadowEnabled.systemd.services.gshadow-sync.wantedBy or [ ];
-       in lib.elem "multi-user.target" w && lib.elem "shadow.service" w)
+      (
+        let w = gshadowEnabled.systemd.services.gshadow-sync.wantedBy or [ ];
+        in lib.elem "multi-user.target" w && lib.elem "shadow.service" w
+      )
       "wantedBy: ${builtins.toJSON (gshadowEnabled.systemd.services.gshadow-sync.wantedBy or null)}")
 
     (check "gshadow-sync/unit-ordered-before-shadow-service"
@@ -782,8 +886,10 @@ let
       "before: ${builtins.toJSON (gshadowEnabled.systemd.services.gshadow-sync.before or null)}")
 
     (check "gshadow-sync/unit-ordered-after-userborn-and-gid-migrate"
-      (let a = gshadowEnabled.systemd.services.gshadow-sync.after or [ ];
-       in lib.elem "userborn.service" a && lib.elem "gid-migrate.service" a)
+      (
+        let a = gshadowEnabled.systemd.services.gshadow-sync.after or [ ];
+        in lib.elem "userborn.service" a && lib.elem "gid-migrate.service" a
+      )
       "after: ${builtins.toJSON (gshadowEnabled.systemd.services.gshadow-sync.after or null)}")
 
     # NOT RemainAfterExit, on purpose (module comment): the unit must be startable again for the
@@ -1053,11 +1159,12 @@ let
     # eww carries no archRepoOn, and a regression collapsing the two would put an unresolvable
     # name in the pacman list on every CachyOS desktop.
     (check "desktop-backend/archrepoon-does-not-lift-every-aur-name-on-that-distro"
-      (lib.elem "eww" (evalDesktopBackend {
-        nixarch.packages = { enable = true; distro = "cachyos"; };
-        nixarch.desktopBackend.enable = true;
-        nixdesktop.desktop = { enable = true; compositor = "niri"; bar = "eww"; };
-      }).nixarch.packages.aur)
+      (lib.elem "eww"
+        (evalDesktopBackend {
+          nixarch.packages = { enable = true; distro = "cachyos"; };
+          nixarch.desktopBackend.enable = true;
+          nixdesktop.desktop = { enable = true; compositor = "niri"; bar = "eww"; };
+        }).nixarch.packages.aur)
       "eww must stay in the AUR partition on cachyos -- it carries no archRepoOn entry")
 
     # Synthetic typing. Both directions, like every other capability here: an unfilled role must
@@ -1166,8 +1273,10 @@ let
     # by absolute path. Both read lib/desktop-roles.nix's tables directly instead of one
     # importing the other -- this is the check that they cannot silently drift apart.
     (check "desktop-backend/system-and-user-layers-agree-on-mate-polkit"
-      (let r = roles.polkitAgents.mate-polkit;
-       in lib.elem (lib.head r.packages) pacmanDefault && lib.hasPrefix "/usr/lib/mate-polkit/" r.command)
+      (
+        let r = roles.polkitAgents.mate-polkit;
+        in lib.elem (lib.head r.packages) pacmanDefault && lib.hasPrefix "/usr/lib/mate-polkit/" r.command
+      )
       "packages: ${builtins.toJSON roles.polkitAgents.mate-polkit.packages}, command: ${roles.polkitAgents.mate-polkit.command}")
 
     (check "desktop-backend/disabled-nixdesktop-profile-is-inert"
@@ -1206,8 +1315,14 @@ let
 
     (check "desktop-backend/file-manager-extras-resolved-on-opt-in"
       (builtins.all (p: lib.elem p pacmanExtrasOptIn)
-        [ "ffmpegthumbnailer" "libopenraw" "thunar-archive-plugin" "engrampa"
-          "thunar-media-tags-plugin" "thunar-vcs-plugin" ])
+        [
+          "ffmpegthumbnailer"
+          "libopenraw"
+          "thunar-archive-plugin"
+          "engrampa"
+          "thunar-media-tags-plugin"
+          "thunar-vcs-plugin"
+        ])
       "pacman: ${builtins.toJSON pacmanExtrasOptIn}")
 
     # The four names nixpkgs has no equivalent for at all -- nixdesktop's own table keeps this key
@@ -1649,9 +1764,11 @@ let
     # /etc was a deadlock: the link needed the package, the package needed the reconciler, the
     # reconciler needed activation past the /etc stage, and the /etc stage died on the link.
     (check "logrotate/timer-enable-unit-runs-after-the-package-reconciler"
-      (let u = logrotateOn.systemd.services.nixarch-logrotate-enable-timer or { }; in
+      (
+        let u = logrotateOn.systemd.services.nixarch-logrotate-enable-timer or { }; in
         (u.after or [ ]) == [ "nixarch-packages-reconcile.service" ]
-        && (u.wants or [ ]) == [ "nixarch-packages-reconcile.service" ])
+        && (u.wants or [ ]) == [ "nixarch-packages-reconcile.service" ]
+      )
       "got after/wants: ${builtins.toJSON [ (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.after or null) (logrotateOn.systemd.services.nixarch-logrotate-enable-timer.wants or null) ]}")
 
     # ...and that unit name is not a guess. modules/packages.nix owns it; if it is ever renamed,
@@ -1688,18 +1805,23 @@ let
     # BEFORE the enable, or it is decoration. The message itself is checked separately, scoped to
     # the message, for the same reason the staleness abort is.
     (check "logrotate/timer-enable-script-tests-for-the-vendor-unit-before-enabling"
-      (let
-        guardIdx = firstInfixIndex ''if [ ! -e "$unit" ]'' enableTimerText;
-        enableIdx = firstInfixIndex "systemctl enable --now logrotate.timer" enableTimerText;
-      in guardIdx != null && enableIdx != null && guardIdx < enableIdx
-        && lib.hasInfix "unit=/usr/lib/systemd/system/logrotate.timer" enableTimerText)
+      (
+        let
+          guardIdx = firstInfixIndex ''if [ ! -e "$unit" ]'' enableTimerText;
+          enableIdx = firstInfixIndex "systemctl enable --now logrotate.timer" enableTimerText;
+        in
+        guardIdx != null && enableIdx != null && guardIdx < enableIdx
+        && lib.hasInfix "unit=/usr/lib/systemd/system/logrotate.timer" enableTimerText
+      )
       "the timer-enable script does not test for the vendor unit before running `systemctl enable`. got: ${builtins.toJSON enableTimerText}")
 
     (check "logrotate/timer-enable-failure-names-the-package-and-the-reconciler"
-      (let m = infixBetween "does not exist" "exit 1" enableTimerText; in
+      (
+        let m = infixBetween "does not exist" "exit 1" enableTimerText; in
         lib.hasInfix "logrotate package is not installed" m
         && lib.hasInfix "nixarch-packages-reconcile.service" m
-        && lib.hasInfix "nixarch.packages.enable" m)
+        && lib.hasInfix "nixarch.packages.enable" m
+      )
       "the missing-vendor-unit message does not name the package, the reconcile unit and the option that switches it on. got: ${builtins.toJSON (infixBetween "does not exist" "exit 1" enableTimerText)}")
 
     (check "logrotate/timer-enable-execstart-is-that-script"
@@ -1776,8 +1898,10 @@ let
   # Positive control: the sweep above must have teeth. This is the exact shape that broke a live
   # host, handed to the same function -- if it comes back empty the guard is vacuous.
   liveSourcePositiveControl = liveSourceEtcEntries [
-    { environment.etc."systemd/system/timers.target.wants/logrotate.timer".source =
-        "/usr/lib/systemd/system/logrotate.timer"; }
+    {
+      environment.etc."systemd/system/timers.target.wants/logrotate.timer".source =
+        "/usr/lib/systemd/system/logrotate.timer";
+    }
   ];
 
   etcSourceClassChecks = [
@@ -1798,7 +1922,7 @@ let
       "got: ${builtins.toJSON foreignServiceEtc.environment.etc."demo.conf"}")
   ];
 
-  results = packagesChecks ++ basePackagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks
+  results = packagesChecks ++ packagesAuditChecks ++ basePackagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks
     ++ desktopBackendChecks ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks
     ++ cachyosToolsChecks ++ cachyosSettingsChecks ++ logrotateChecks ++ etcSourceClassChecks;
 
@@ -1809,10 +1933,11 @@ let
     failed;
 in
 if failed != [ ]
-then throw ''
-  nixarch eval-checks FAILED (${toString (builtins.length failed)}/${toString (builtins.length results)}):
-  ${report}
-''
+then
+  throw ''
+    nixarch eval-checks FAILED (${toString (builtins.length failed)}/${toString (builtins.length results)}):
+    ${report}
+  ''
 else {
   # Constructing this derivation depends on `passedCount`, which forces `results` (and therefore
   # every `check` assertion above) even if nothing else ever reads the attribute -- so the checks
@@ -1823,7 +1948,8 @@ else {
       # NOT silent: a suite that quietly covers less than it appears to is the failure this
       # whole file exists to prevent, and it already happened once -- these assertions sat
       # unreachable from any flake output and reported success without running.
-      skipped = if nixdesktop == null
+      skipped =
+        if nixdesktop == null
         then "desktop-backend, home-desktop (no nixdesktop checkout; run standalone for those)"
         else "none";
     }

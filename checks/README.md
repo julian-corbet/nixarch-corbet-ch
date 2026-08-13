@@ -72,6 +72,14 @@ it. Stubbing it would only prove that this module writes the options it writes.
   old sync directory, confirm it aborts *before* `pacman -S` on a stale database with something to
   fetch, stays quiet on a stale database with nothing to fetch, and names the database age when a
   stubbed 404 comes back.
+- **`packages-audit`** — the drift report is scheduled by a timer and is never wanted by the
+  activation target; its service has a finite ten-minute ceiling and does not remain active after
+  reporting. Static script checks pin the performance-critical query shape: one `pacman -Sgg`
+  reads the complete group-membership index, rather than one `pacman -Sgq` process per declared
+  package. This is paired with a live, read-only benchmark on CachyOS: 4,189 membership rows in
+  204 ms, with a 283-member group expanded correctly. The previous per-package implementation
+  held `system-manager.target` open for 97 minutes and made the activation engine time out after
+  30 seconds.
 - **`base-packages`** — `reflector`, `rebuild-detector`, `arch-install-scripts`, `base` and
   `base-devel` land in `pacman` regardless of `nixarch.packages.distro` (the same answer on every
   Arch-family host); `paru` is the one name that splits on it — `aur` on the default `"arch"`
@@ -164,14 +172,14 @@ yours lives elsewhere.
 
 ```console
 $ nix-instantiate --eval --strict -A eval-checks.passedCount checks
-"167"
+"179"
 ```
 
 A failing check throws before that derivation attribute even exists, with every failing check's
 name and a `got: ...` detail — not just the first one:
 
 ```
-error: nixarch eval-checks FAILED (1/167):
+error: nixarch eval-checks FAILED (1/179):
   - packages/prune-undeclared-defaults-off: got: true
 ```
 

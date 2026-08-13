@@ -21,12 +21,13 @@
 #      duplicate.
 #
 # Neither is a build-time question. Both are about what is actually on the disk, which is why this
-# runs on the machine at activation rather than being a check in a flake.
+# runs on the machine rather than being a check in a flake.
 #
 # WARN-ONLY, ON PURPOSE, FOR NOW. Nobody knows how big this is on a machine that has never been
 # audited, and a first run that BLOCKS activation on a decade of accumulated drift is a report
-# nobody can act on -- it just gets disabled. It reports, every activation, until the number is
-# small enough that turning it into an error is a decision rather than a demolition.
+# nobody can act on -- it just gets disabled. The timer therefore runs it outside activation's
+# critical path. It keeps reporting daily until the number is small enough that turning it into
+# an error is a decision rather than a demolition.
 #
 # IT DOES NOT DECIDE ANYTHING. Every line it prints is a question for a human: declare it, or
 # remove it. This module has no opinion about which, because the answer depends on whether the
@@ -50,12 +51,20 @@ let
 
     # Groups (base, base-devel) expand to their members; a declared group means every package in
     # it is declared. Without this every member of base-devel reads as undeclared.
+    #
+    # Ask pacman for the whole group index ONCE. The old implementation ran `pacman -Sgq` once per
+    # declared package, including ordinary packages that were not groups. On a real workstation
+    # that turned a report into a 90-minute CPU-bound activation job. One `pacman -Sgg` gives us
+    # every `group package` row; awk selects members whose group itself is declared.
+    group_rows=$(pacman -Sgg 2>/dev/null || true)
     expanded=$(
-      printf '%s\n' "$declared" | while IFS= read -r p; do
-        [ -n "$p" ] || continue
-        members=$(pacman -Sgq "$p" 2>/dev/null)
-        if [ -n "$members" ]; then printf '%s\n' "$members"; else printf '%s\n' "$p"; fi
-      done | sort -u
+      {
+        printf '%s\n' "$declared"
+        awk 'NR == FNR { if ($0 != "") declared[$0] = 1; next }
+             ($1 in declared) { print $2 }' \
+          <(printf '%s\n' "$declared") \
+          <(printf '%s\n' "$group_rows")
+      } | sort -u
     )
 
     undeclared=$(comm -13 <(printf '%s\n' "$expanded") <(pacman -Qeq | sort -u))
@@ -110,18 +119,28 @@ let
   '';
 in
 {
-  options.nixarch.packages.audit.enable = lib.mkEnableOption ''
-    reporting installed-but-undeclared packages and duplicated commands after each reconcile.
+  options.nixarch.packages.audit = {
+    enable = lib.mkEnableOption ''
+      periodic reporting of installed-but-undeclared packages and duplicated commands.
 
-    Reports only -- it installs nothing, removes nothing, and cannot fail an activation. See the
-    module header for the two classes of drift it exists to surface and why neither is visible to
-    the reconcile itself or to any build-time check.
-  '';
+      Reports only -- it installs nothing, removes nothing, and runs from a timer outside the
+      activation-critical path. See the module header for the two classes of drift it exists to
+      surface and why neither is visible to the reconcile itself or to any build-time check.
+    '';
+
+    script = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      internal = true;
+      description = "The generated package-audit script, exposed for static regression checks.";
+    };
+  };
 
   config = lib.mkIf (cfg.enable && cfg.audit.enable) {
+    nixarch.packages.audit.script = audit;
+
     systemd.services.nixarch-packages-audit = {
       description = "nixarch: report undeclared packages and duplicated commands (reports only)";
-      wantedBy = [ "multi-user.target" ];
       # AFTER the reconcile, so it describes the converged machine rather than the one that was
       # there a moment ago. `after` only -- not `requires`: a reconcile that fails on one broken
       # AUR package is exactly when an operator most wants to know what else is adrift, and a
@@ -131,8 +150,25 @@ in
       environment.PATH = lib.mkForce hostPaths.hostPath;
       serviceConfig = {
         Type = "oneshot";
-        RemainAfterExit = true;
+        # A report may never hold a deployment open or consume a core forever. The timer can try
+        # again tomorrow; activation cannot get the lost time back.
+        TimeoutStartSec = "10min";
         ExecStart = "${audit}";
+      };
+    };
+
+    # Deliberately NOT wanted by multi-user.target/system-manager.target. system-manager waits a
+    # fixed 30 seconds for target jobs, while this best-effort report walks package databases and
+    # command trees. Scheduling it shortly after the timer becomes active preserves the report
+    # without putting SSH/session/network activation behind it.
+    systemd.timers.nixarch-packages-audit = {
+      description = "nixarch: periodically report undeclared packages and duplicated commands";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "5min";
+        OnUnitActiveSec = "1d";
+        RandomizedDelaySec = "5min";
+        Unit = "nixarch-packages-audit.service";
       };
     };
   };
