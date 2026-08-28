@@ -30,6 +30,7 @@ let
       ({ lib, ... }: {
         options.nixarch.packages = {
           enable = lib.mkEnableOption "stub";
+          distro = lib.mkOption { type = lib.types.enum [ "arch" "cachyos" ]; default = "arch"; };
           pacman = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
           # Both halves of the split, even though this experiment only reads `pacman`: the stub
           # has to cover everything the module WRITES, not just what the check reads.
@@ -44,20 +45,21 @@ let
           extraPacman = [ "blueman" ];
         };
         # `compositor` has no default -- nixdesktop refuses to prefer one, so it must be named.
-        # defaults: thunar, mate-polkit, waybar, foot...
+        # defaults: thunar, soteria, waybar, foot...
         nixdesktop.desktop = { enable = true; compositor = "niri"; };
       }
     ];
   };
 
   pacman = sys.config.nixarch.packages.pacman;
+  aur = sys.config.nixarch.packages.aur;
 in
 rec {
-  inherit pacman;
+  inherit pacman aur;
 
   # The doctrinal defaults survive the whole round trip: role -> want -> Arch package.
   thunarResolved = lib.elem "thunar" pacman && lib.elem "tumbler" pacman && lib.elem "gvfs" pacman;
-  matePolkitResolved = lib.elem "mate-polkit" pacman;
+  soteriaResolved = lib.elem "soteria-git" aur;
   compositorResolved = lib.elem "niri" pacman && lib.elem "brightnessctl" pacman;
   capabilitiesResolved = lib.elem "grim" pacman && lib.elem "swayidle" pacman && lib.elem "xwayland-satellite" pacman;
   extraPacmanApplied = lib.elem "blueman" pacman;
@@ -70,9 +72,10 @@ rec {
   # The two halves agree: the agent the system layer installs is the binary the user layer
   # spawns. Drift here is the exact failure the shared table exists to prevent.
   halvesAgree =
-    let r = roles.polkitAgents.mate-polkit;
-    in lib.elem (lib.head r.packages) pacman && lib.hasPrefix "/usr/lib/mate-polkit/" r.command;
+    let r = roles.polkitAgents.soteria;
+    in lib.elem (lib.head r.packages) aur
+      && r.command == "/usr/lib/soteria-polkit/soteria";
 
-  ok = thunarResolved && matePolkitResolved && compositorResolved
+  ok = thunarResolved && soteriaResolved && compositorResolved
     && capabilitiesResolved && extraPacmanApplied && noKdeByDefault && halvesAgree;
 }

@@ -319,7 +319,7 @@ publishing anything.
 
 The user-layer companion, `homeManagerModules.desktop`, turns the same role
 names into the commands that spawn them, so absolute paths like
-`/usr/lib/mate-polkit/polkit-mate-authentication-agent-1` stay out of personal
+`/usr/lib/soteria-polkit/soteria` stay out of personal
 config:
 
 ```nix
@@ -332,7 +332,7 @@ config:
   nixdesktop.niri.enable = true;
   nixarch.home.desktop = {
     enable = true;
-    polkitAgent = "mate-polkit";     # must match the system layer
+    polkitAgent = "soteria";         # must match the system layer
     keyring = "gnome-keyring";
   };
 }

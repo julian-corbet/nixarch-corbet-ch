@@ -5,7 +5,7 @@
 # (`session.polkitAgent.command` / `session.keyring.command`), because those invocations are
 # platform-specific and nixdesktop refuses to know about platforms. Somebody has to supply the
 # string. Before this module that somebody was the consumer, hand-writing
-# "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1" into a values file.
+# "/usr/lib/soteria-polkit/soteria" into a values file.
 #
 # So: state the same role you gave the system layer, get the right command for Arch. The tables
 # are shared with modules/desktop-backend.nix (lib/desktop-roles.nix), so the package that gets

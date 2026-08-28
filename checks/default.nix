@@ -953,7 +953,7 @@ let
   desktopDefault = evalDesktopBackend {
     nixarch.packages.enable = true;
     nixarch.desktopBackend = { enable = true; extraPacman = [ "blueman" ]; };
-    # defaults: thunar, mate-polkit, waybar, foot...
+    # defaults: thunar, soteria, waybar, foot...
     nixdesktop.desktop = { enable = true; compositor = "niri"; };
   };
   pacmanDefault = desktopDefault.nixarch.packages.pacman;
@@ -1104,8 +1104,9 @@ let
       "pacman: ${builtins.toJSON pacmanDefault}")
 
     (check "desktop-backend/polkit-agent-role-resolved"
-      (lib.elem "mate-polkit" pacmanDefault)
-      "pacman: ${builtins.toJSON pacmanDefault}")
+      (lib.elem "soteria-git" desktopDefault.nixarch.packages.aur
+        && !lib.elem "soteria-git" pacmanDefault)
+      "pacman: ${builtins.toJSON pacmanDefault}, aur: ${builtins.toJSON desktopDefault.nixarch.packages.aur}")
 
     (check "desktop-backend/input-role-unfilled-installs-no-remapper"
       (!lib.elem "keyd" pacmanDefault)
@@ -1272,12 +1273,13 @@ let
     # The system layer installs the package; the user layer (home/desktop.nix) spawns its binary
     # by absolute path. Both read lib/desktop-roles.nix's tables directly instead of one
     # importing the other -- this is the check that they cannot silently drift apart.
-    (check "desktop-backend/system-and-user-layers-agree-on-mate-polkit"
+    (check "desktop-backend/system-and-user-layers-agree-on-soteria"
       (
-        let r = roles.polkitAgents.mate-polkit;
-        in lib.elem (lib.head r.packages) pacmanDefault && lib.hasPrefix "/usr/lib/mate-polkit/" r.command
+        let r = roles.polkitAgents.soteria;
+        in lib.elem (lib.head r.packages) desktopDefault.nixarch.packages.aur
+          && r.command == "/usr/lib/soteria-polkit/soteria"
       )
-      "packages: ${builtins.toJSON roles.polkitAgents.mate-polkit.packages}, command: ${roles.polkitAgents.mate-polkit.command}")
+      "packages: ${builtins.toJSON roles.polkitAgents.soteria.packages}, command: ${roles.polkitAgents.soteria.command}")
 
     (check "desktop-backend/disabled-nixdesktop-profile-is-inert"
       (desktopProfileDisabled.nixarch.packages.pacman == [ ])
@@ -1343,11 +1345,10 @@ let
         && !(lib.elem "adw-gtk3" pacmanExtrasOptIn))
       "pacman: ${builtins.toJSON pacmanExtrasOptIn}")
 
-    # Every capability name must be a repo package, since one unknown target aborts the whole
-    # pacman transaction and takes the rest of the desktop with it. The partition is what stops
-    # that, so it has to be right about these too: nothing new here belongs in `aurOnly`.
+    # Every opted-in capability name here must be a repo package. The default Soteria agent is
+    # already AUR-backed; enabling these capabilities must add nothing else to that partition.
     (check "desktop-backend/capability-extras-are-repo-packages-not-aur"
-      (desktopExtrasOptIn.nixarch.packages.aur == [ ])
+      (desktopExtrasOptIn.nixarch.packages.aur == desktopDefault.nixarch.packages.aur)
       "aur: ${builtins.toJSON desktopExtrasOptIn.nixarch.packages.aur}")
 
     # ── oo7 ──────────────────────────────────────────────────────────────────────────────────
@@ -1367,7 +1368,7 @@ let
 
     # The daemon is at `/usr/lib/oo7-daemon`, NOT `/usr/bin` -- so unlike gnome-keyring-daemon and
     # kwalletd6 a bare name would resolve nowhere. Pinned as an absolute path for the same reason
-    # the mate-polkit check above pins its `/usr/lib/` prefix.
+    # the Soteria check above pins its `/usr/lib/` prefix.
     (check "desktop-backend/oo7-command-is-an-absolute-libexec-path"
       (lib.hasPrefix "/usr/lib/" roles.keyrings.oo7.command)
       "command: ${roles.keyrings.oo7.command}")
@@ -1412,12 +1413,12 @@ let
 
   homeGnomeKeyring = evalHomeDesktop {
     nixdesktop.session.enable = true;
-    nixarch.home.desktop = { enable = true; polkitAgent = "mate-polkit"; keyring = "gnome-keyring"; };
+    nixarch.home.desktop = { enable = true; polkitAgent = "soteria"; keyring = "gnome-keyring"; };
   };
 
   homeOo7 = evalHomeDesktop {
     nixdesktop.session.enable = true;
-    nixarch.home.desktop = { enable = true; polkitAgent = "mate-polkit"; keyring = "oo7"; };
+    nixarch.home.desktop = { enable = true; polkitAgent = "soteria"; keyring = "oo7"; };
   };
 
   failedAssertions = c: map (a: a.message) (lib.filter (a: !a.assertion) c.assertions);
@@ -1429,7 +1430,11 @@ let
       "units: ${builtins.toJSON (builtins.attrNames homeGnomeKeyring.systemd.user.services)}, command: ${builtins.toJSON homeGnomeKeyring.nixdesktop.session.keyring.command}")
 
     (check "home-desktop/polkit-agent-renders-a-unit"
-      (homeGnomeKeyring.systemd.user.services ? "polkit-agent")
+      (homeGnomeKeyring.systemd.user.services ? "polkit-agent"
+        && homeGnomeKeyring.nixdesktop.session.polkitAgent.command
+          == roles.polkitAgents.soteria.command
+        && lib.elem "GSK_RENDERER=cairo"
+          homeGnomeKeyring.systemd.user.services."polkit-agent".Service.Environment)
       "units: ${builtins.toJSON (builtins.attrNames homeGnomeKeyring.systemd.user.services)}")
 
     # THE oo7 PROPERTY, and the reason this section exists at all. The pacman `oo7` package ships

@@ -10,7 +10,7 @@
 # drift apart; keeping them in a plain .nix file means neither module has to import the other.
 #
 # THIS FILE IS THE ONLY PLACE IN THE PROJECT THAT KNOWS ARCH PACKAGE NAMES for the desktop.
-# nixdesktop declares roles ("thunar", "mate-polkit") and never names a package or a path; that
+# nixdesktop declares roles ("thunar", "soteria") and never names a package or a path; that
 # is the whole point of the split. A NixOS backend would be this file with nixpkgs attributes
 # instead, and no change to nixdesktop at all.
 { lib }:
@@ -38,9 +38,11 @@ rec {
   };
 
   polkitAgents = {
-    mate-polkit = {
-      packages = [ "mate-polkit" ];
-      command = "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1";
+    soteria = {
+      # Soteria is not in Arch's binary repositories. The AUR package builds the current upstream
+      # main branch from source and installs its deliberately non-PATH agent binary here.
+      packages = [ "soteria-git" ];
+      command = "/usr/lib/soteria-polkit/soteria";
     };
     polkit-kde-agent = {
       # qt6ct rides along deliberately: this agent is the only Qt component on an otherwise-GTK
@@ -272,7 +274,7 @@ rec {
       # Picking the one name that works on both platforms costs nothing here and removes a
       # divergence that would otherwise have to be remembered every time either side changed.
       # Of the three, engrampa is GTK3 (ark drags KDE Frameworks, file-roller is GTK4+libadwaita),
-      # matching the same constraint that makes mate-polkit the polkit agent.
+      # matching the same CPU-rendering constraint applied to the Soteria polkit agent.
       "engrampa"
 
       # ── The format backends ─────────────────────────────────────────────────────────────────
@@ -413,6 +415,8 @@ rec {
   # that has no interest in the distinction. It also covers free-form values (`extraComponents`,
   # `launcher`, `terminal`) that never appear in a table at all.
   aurOnly = [
+    # Rust/GTK4 polkit agent, built directly from upstream main by the AUR package.
+    "soteria-git"
     # In the AUR only; the repos carry no eww.
     "eww"
     # In the AUR only; see the `compositors.scroll` entry above for the full account.
