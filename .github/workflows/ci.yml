@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            sandbox = true
+
+      - name: Check every declared system
+        run: nix flake check --all-systems --keep-going --print-build-logs
+
+      # nixarch deliberately has no nixdesktop flake edge. Exercise the live
+      # option-value contract by checking current sibling sources explicitly.
+      - name: Check the nixdesktop backend contract
+        run: |
+          git clone --depth 1 https://github.com/julian-corbet/nixdesktop-corbet-ch.git ../nixdesktop
+          git clone --depth 1 https://github.com/julian-corbet/nixhost-corbet-ch.git ../nixhost
+          nix-instantiate --eval --strict checks/default.nix \
+            --arg nixdesktop ../nixdesktop \
+            -A eval-checks.drvPath

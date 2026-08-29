@@ -94,8 +94,9 @@ it. Stubbing it would only prove that this module writes the options it writes.
   ordering (`after` userborn/gid-migrate, `before` shadow.service, `wantedBy` both
   multi-user.target and shadow.service) and is *not* `RemainAfterExit`; disabled contributes
   nothing.
-- **`desktop-backend`** — nixdesktop's roles resolve to real Arch packages (file manager, polkit
-  agent, compositor, capabilities), and — the regression this suite most wants to catch — the
+- **`desktop-backend`** — nixdesktop's shared roles resolve to real Arch packages (file manager,
+  polkit agent, capabilities), while the selected compositor remains owned by its integration
+  product, and — the regression this suite most wants to catch — the
   **defaults pull in zero KDE packages**. The old profile defaulted the polkit agent to
   `polkit-kde-agent`, so an unopinionated consumer silently got a KDE Frameworks stack reinstalled
   on every activation. A positive-control check proves `polkit-kde-agent`/`qt6ct` *can* appear on

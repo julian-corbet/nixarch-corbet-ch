@@ -345,9 +345,8 @@ let
     # transaction: one package's checksum failure fails the command, and under
     # `set -eu` a failed command kills the script outright — taking every OTHER
     # declared AUR package down with it, including ones with nothing to do with
-    # the one that actually failed (on a real host: `sway-scroll`, the
-    # compositor, and `evdi-dkms`, the DisplayLink kernel driver, both silently
-    # never installed because `zoom`, alphabetically last, 404'd first).
+    # the one that actually failed. A transient failure in one package must not
+    # prevent unrelated declared drivers or desktop components from converging.
     #
     # So: try the batch, and ONLY on failure fall back to one invocation per
     # package to find out which one(s) actually failed. `if cmd; then .. else
@@ -839,6 +838,6 @@ in
         ExecStart = "${reconcile}";
       };
     };
-    })
+  })
   ];
 }

@@ -389,20 +389,6 @@ rec {
     inputAutomation = [ "ydotool" ];
   };
 
-  # The compositor plus what its own default keybinds shell out to. niri's stock media and
-  # brightness binds call these by name, so a compositor installed without them has keys that
-  # silently do nothing.
-  compositors.niri = [ "niri" "brightnessctl" "playerctl" ];
-
-  # `resolve`'s own fallthrough (see below: "on Arch the role name is usually already the package
-  # name") is wrong for scroll specifically — the repos carry no package literally named `scroll`
-  # at all, official or AUR (verified live, `pacman -Si scroll` / `-Ss scroll`, 2026-08-04). The
-  # real package is `sway-scroll` (a sway/wlroots fork, AUR-only, maintained by scroll's own
-  # upstream author) — without this entry, `resolve compositors "scroll"` fell through to
-  # `[ "scroll" ]`, and every reconcile run failed outright on "target not found: scroll" before
-  # ever reaching any other package, AUR or repo. Found live chasing an unrelated AUR install.
-  compositors.scroll = [ "sway-scroll" ];
-
   # ── Which of the names above are AUR-only ───────────────────────────────────────────────────
 
   # `pacman -S` aborts the ENTIRE transaction on one unknown target, so a single AUR name mixed
@@ -419,8 +405,6 @@ rec {
     "soteria-git"
     # In the AUR only; the repos carry no eww.
     "eww"
-    # In the AUR only; see the `compositors.scroll` entry above for the full account.
-    "sway-scroll"
     # In the AUR only UPSTREAM -- but see `archRepoOn` immediately below, which lifts it back into
     # the pacman transaction on a derivative whose own repository ships a prebuilt one.
     "czkawka-gui"
@@ -523,8 +507,7 @@ rec {
   packagesFor = want:
     if want == { } then [ ] else
     lib.unique (
-      resolve compositors (want.compositor or null)
-      ++ resolve bars (want.bar or null)
+      resolve bars (want.bar or null)
       ++ resolve notificationDaemons (want.notifications or null)
       ++ resolve fileManagers (want.fileManager or null)
       ++ resolve polkitAgents (want.polkitAgent or null)
@@ -538,15 +521,9 @@ rec {
       #
       # Both have been in nixdesktop's `want` contract all along and were dropped on the floor
       # here, so a host declaring them got the declaration and not the package. In practice that is
-      # worse than a plainly missing package, because something else supplied them for a while and
-      # then stopped:
-      #
-      #   · `brightnessctl` arrived only as a passenger on `compositors.niri` below. When niri was
-      #     retired fleet-wide (2026-08-02) and scroll took over, nothing carried it any more -- so
-      #     a box that had declared `brightness = "brightnessctl"` since April kept working purely
-      #     because the package was still installed from the niri days, while a fresh install of
-      #     the same declared config would have come up with dead brightness keys.
-      #   · `wallpapers` was never resolved by anything at all.
+      # worse than a plainly missing package: a compositor integration may happen to carry a
+      # setter today and stop tomorrow, while `wallpapers` has no other natural provider at all.
+      # Both therefore remain explicit neutral roles rather than passengers on another product.
       #
       # Same passthrough shape as `launcher`/`terminal` above and `iconThemes` below, for the same
       # reason: these option values ARE Arch package names (`brightness` is an enum of them,

@@ -279,9 +279,11 @@ profile publishes, resolves each role through
 }
 ```
 
-That alone resolves to a working niri desktop — compositor, bar, notifier,
-launcher, terminal, file manager, polkit agent, keyring, portals, idle/lock,
-clipboard and screenshot tooling.
+That resolves the shared desktop roles — bar, notifier, launcher, terminal,
+file manager, polkit agent, keyring, generic portals, idle/lock, clipboard and
+screenshot tooling. It deliberately does not install niri: import and enable
+`nixciri.systemManagerModules.ciri` (or the corresponding nixscroll module) to
+materialize the selected compositor, its descriptor, and its companions.
 
 Role resolution falls through to the role name itself when a role is not in the
 tables, which is why `fileManager`, `launcher` and `terminal` can be free-form:
@@ -325,11 +327,11 @@ config:
 ```nix
 {
   imports = [
-    inputs.nixdesktop.homeModules.niri
+    inputs.nixdesktop.homeManagerModules.session
     inputs.nixarch.homeManagerModules.desktop
   ];
 
-  nixdesktop.niri.enable = true;
+  nixdesktop.session.enable = true;
   nixarch.home.desktop = {
     enable = true;
     polkitAgent = "soteria";         # must match the system layer

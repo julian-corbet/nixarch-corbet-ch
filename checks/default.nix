@@ -163,8 +163,8 @@ let
 
   # AUR-isolation (step 2 of the reconcile script): a batch AUR failure must not silently drop
   # every OTHER declared AUR package (the defect this step exists to prevent -- see
-  # modules/packages.nix's own header comment on this step for the zoom/sway-scroll/evdi-dkms
-  # case that motivated it). These read the STATIC TEXT of the actual generated reconcile script
+  # modules/packages.nix's own header comment). These read the STATIC TEXT of the actual generated
+  # reconcile script
   # via `pkgs.writeShellScript`'s own `.text` passthru -- the literal string handed to it, which
   # Nix can read at eval time with no build/store-realisation of the script itself. That proves
   # the SHAPE of the control flow (the batch attempt is `if`-guarded rather than bare; a
@@ -992,10 +992,8 @@ let
   };
   pacmanExtrasOptIn = desktopExtrasOptIn.nixarch.packages.pacman;
 
-  # brightness + wallpapers, on a SCROLL host. The compositor matters: `brightnessctl` used to
-  # arrive only as a passenger on `compositors.niri`, so a niri fixture would pass while the
-  # declared role stayed unresolved. Scroll is what every real host runs now, and it carries
-  # neither package.
+  # Brightness and wallpapers are explicit shared roles. The compositor value is deliberately
+  # irrelevant: its integration owns that runtime and cannot mask either assertion here.
   desktopBrightnessWallpapers = evalDesktopBackend {
     nixarch.packages.enable = true;
     nixarch.desktopBackend.enable = true;
@@ -1234,9 +1232,12 @@ let
         && !lib.elem "char-white" desktopIconsCachyos.nixarch.packages.aur)
       "pacman: ${builtins.toJSON desktopIconsCachyos.nixarch.packages.pacman}, aur: ${builtins.toJSON desktopIconsCachyos.nixarch.packages.aur}")
 
-    (check "desktop-backend/compositor-role-resolved"
-      (lib.elem "niri" pacmanDefault && lib.elem "brightnessctl" pacmanDefault && lib.elem "playerctl" pacmanDefault)
-      "pacman: ${builtins.toJSON pacmanDefault}")
+    (check "desktop-backend/compositor-remains-integration-owned"
+      (!(lib.elem "niri" pacmanDefault)
+        && !(lib.elem "brightnessctl" pacmanDefault)
+        && !(lib.elem "playerctl" pacmanDefault)
+        && !(lib.elem "sway-scroll" desktopDefault.nixarch.packages.aur))
+      "pacman: ${builtins.toJSON pacmanDefault}, aur: ${builtins.toJSON desktopDefault.nixarch.packages.aur}")
 
     (check "desktop-backend/capability-roles-resolved"
       (lib.elem "grim" pacmanDefault && lib.elem "slurp" pacmanDefault
