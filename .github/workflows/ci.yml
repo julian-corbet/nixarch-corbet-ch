@@ -28,5 +28,6 @@ jobs:
           git clone --depth 1 https://github.com/julian-corbet/nixdesktop-corbet-ch.git ../nixdesktop
           git clone --depth 1 https://github.com/julian-corbet/nixhost-corbet-ch.git ../nixhost
           nix-instantiate --eval --strict checks/default.nix \
+            --arg nixpkgs '(builtins.getFlake (toString ./.)).inputs.nixpkgs.outPath' \
             --arg nixdesktop ../nixdesktop \
             -A eval-checks.drvPath
