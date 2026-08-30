@@ -16,6 +16,7 @@
 # experiments/gcroot-guard-eval.nix for what WAS verified against a live CachyOS box.
 { nixpkgs ? <nixpkgs>
 , nixdesktop ? ../../nixdesktop
+, nixaudio ? ../../nixaudio
   # Threaded in rather than left to `builtins.currentSystem`, which does not exist during pure
   # flake evaluation — reaching for it is what kept this suite unreachable from `flake check`.
   # The default preserves the standalone `nix-instantiate --eval` invocation documented below.
@@ -31,6 +32,7 @@ let
   pkgs = import nixpkgs { inherit system; };
   lib = pkgs.lib;
   roles = import ../lib/desktop-roles.nix { inherit lib; };
+  audioRoles = import ../lib/audio-roles.nix { inherit lib; };
   hostPaths = import ../lib/host-path.nix { inherit lib; };
   deviceGidsModule = import ../modules/device-gids.nix { inherit probeFact; };
 
@@ -1481,6 +1483,132 @@ let
   ];
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # audio backend -- both independent evaluations, using NixAudio's real modules. Like the
+  # desktop checks, these run only in the standalone suite because nixarch deliberately has no
+  # flake dependency on the domain module whose semantic option contract it consumes.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  audioCircle = {
+    nixaudio.fabric = {
+      enable = true;
+      node = "alpha";
+      control.listen = "192.0.2.1";
+      peers.beta = {
+        addresses = [ "192.0.2.2" ];
+        audioPort = 26301;
+      };
+    };
+  };
+
+  evalAudioBackend = extraConfig: (lib.evalModules {
+    modules = [
+      systemManagerSurfaceStub
+      desktopBackendStub
+      { _module.args.pkgs = pkgs; }
+      (nixaudio + "/system-manager/default.nix")
+      ../modules/audio-backend.nix
+      audioCircle
+      extraConfig
+    ];
+  }).config;
+
+  audioDefault = evalAudioBackend {
+    nixarch.packages.enable = true;
+    nixarch.audioBackend.enable = true;
+  };
+
+  audioWithFirmware = evalAudioBackend {
+    nixarch.packages.enable = true;
+    nixarch.audioBackend.enable = true;
+    nixaudio.backend.sofFirmware.enable = true;
+  };
+
+  audioHomeSurfaceStub = { lib, ... }: {
+    options = {
+      xdg.configHome = lib.mkOption { type = lib.types.str; default = "/home/test/.config"; };
+      xdg.configFile = lib.mkOption { type = lib.types.attrsOf lib.types.unspecified; default = { }; };
+      home.packages = lib.mkOption { type = lib.types.listOf lib.types.package; default = [ ]; };
+      systemd.user.services = lib.mkOption { type = lib.types.attrsOf lib.types.unspecified; default = { }; };
+      systemd.user.timers = lib.mkOption { type = lib.types.attrsOf lib.types.unspecified; default = { }; };
+      assertions = lib.mkOption { type = lib.types.listOf lib.types.attrs; default = [ ]; };
+      warnings = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+    };
+  };
+
+  audioHome = (lib.evalModules {
+    modules = [
+      audioHomeSurfaceStub
+      { _module.args.pkgs = pkgs; }
+      (nixaudio + "/home/default.nix")
+      ../home/audio.nix
+      audioCircle
+      { nixarch.home.audio.enable = true; }
+    ];
+  }).config;
+
+  expectedAudioPackages = [
+    "pipewire"
+    "pipewire-audio"
+    "wireplumber"
+    "pipewire-alsa"
+    "pipewire-jack"
+    "pipewire-pulse"
+    "alsa-utils"
+  ];
+
+  audioBackendChecks = if nixaudio == null then [ ] else [
+    (check "audio-backend/nixaudio-publishes-only-semantic-requirements"
+      (audioDefault.nixaudio.want == {
+        graph = "pipewire";
+        sessionPolicy = "wireplumber";
+        clientProtocols = [ "alsa" "jack" "pulse" ];
+        diagnostics = [ "alsa" ];
+        firmware = [ ];
+      })
+      "want: ${builtins.toJSON audioDefault.nixaudio.want}")
+
+    (check "audio-backend/every-role-resolves-to-the-arch-package-floor"
+      (audioDefault.nixarch.packages.pacman == expectedAudioPackages)
+      "pacman: ${builtins.toJSON audioDefault.nixarch.packages.pacman}")
+
+    (check "audio-backend/current-floor-needs-no-aur-package"
+      (audioDefault.nixarch.packages.aur == [ ])
+      "aur: ${builtins.toJSON audioDefault.nixarch.packages.aur}")
+
+    (check "audio-backend/sof-firmware-is-hardware-gated"
+      (!(lib.elem "sof-firmware" audioDefault.nixarch.packages.pacman)
+        && lib.elem "sof-firmware" audioWithFirmware.nixarch.packages.pacman)
+      "default: ${builtins.toJSON audioDefault.nixarch.packages.pacman}, enabled: ${builtins.toJSON audioWithFirmware.nixarch.packages.pacman}")
+
+    (check "audio-backend/transport-keeps-the-abi-matched-nix-pw-jack-bridge"
+      (audioDefault.nixaudio.fabric.transport.command == [
+        "${pkgs.pipewire.jack}/bin/pw-jack"
+        "${audioDefault.nixaudio.fabric.transport.package}/bin/jacktrip"
+      ])
+      "command: ${builtins.toJSON audioDefault.nixaudio.fabric.transport.command}")
+
+    (check "home-audio/platform-paths-live-in-nixarch"
+      (audioHome.nixaudio.daemon.toolPath == [ "/usr/bin" ]
+        && audioHome.nixaudio.guard.toolPath == [ "/usr/bin" ]
+        && builtins.elem "PATH=/usr/bin"
+        audioHome.systemd.user.services.nixaudiod.Service.Environment)
+      "daemon PATH: ${builtins.toJSON audioHome.nixaudio.daemon.toolPath}, guard PATH: ${builtins.toJSON audioHome.nixaudio.guard.toolPath}")
+
+    (check "home-audio/transport-uses-the-same-abi-matched-bridge"
+      (audioHome.nixaudio.fabric.transport.command == [
+        "${pkgs.pipewire.jack}/bin/pw-jack"
+        "${audioHome.nixaudio.fabric.transport.package}/bin/jacktrip"
+      ])
+      "command: ${builtins.toJSON audioHome.nixaudio.fabric.transport.command}")
+
+    # Positive structural check: each table selected by the published contract is non-empty. A
+    # role added to NixAudio without an Arch answer must fail here rather than silently disappear.
+    (check "audio-backend/semantic-role-tables-are-total-for-the-current-contract"
+      (audioRoles.packagesFor audioDefault.nixaudio.want == expectedAudioPackages)
+      "resolved: ${builtins.toJSON (audioRoles.packagesFor audioDefault.nixaudio.want)}")
+  ];
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
   # gcroot-guard (modules/gcroot-guard.nix) -- lifted from experiments/gcroot-guard-eval.nix,
   # which this supersedes as the permanently-run version of the same check.
   # ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -1929,7 +2057,7 @@ let
   ];
 
   results = packagesChecks ++ packagesAuditChecks ++ basePackagesChecks ++ deviceGidsChecks ++ gshadowSyncChecks
-    ++ desktopBackendChecks ++ homeDesktopChecks ++ gcrootGuardChecks ++ shellyChecks
+    ++ desktopBackendChecks ++ homeDesktopChecks ++ audioBackendChecks ++ gcrootGuardChecks ++ shellyChecks
     ++ cachyosToolsChecks ++ cachyosSettingsChecks ++ logrotateChecks ++ etcSourceClassChecks;
 
   failed = builtins.filter (r: !r.ok) results;
@@ -1955,9 +2083,17 @@ else {
       # whole file exists to prevent, and it already happened once -- these assertions sat
       # unreachable from any flake output and reported success without running.
       skipped =
-        if nixdesktop == null
-        then "desktop-backend, home-desktop (no nixdesktop checkout; run standalone for those)"
-        else "none";
+        let
+          omitted = lib.filter (s: s != "") [
+            (if nixdesktop == null
+            then "desktop-backend, home-desktop (no nixdesktop checkout; run standalone for those)"
+            else "")
+            (if nixaudio == null
+            then "audio-backend, home-audio (no nixaudio checkout; run standalone for those)"
+            else "")
+          ];
+        in
+        if omitted == [ ] then "none" else lib.concatStringsSep "; " omitted;
     }
     ''
       echo "all $passedCount nixarch eval checks passed"

@@ -25,6 +25,9 @@ system and user layers:
 - **`desktop-backend`** — the Arch resolution layer for [nixdesktop][nixdesktop]:
   turns platform-neutral desktop *roles* into real pacman packages. The only
   place in the project that knows a desktop package name.
+- **`audio-backend`** — the Arch resolution layer for [NixAudio][nixaudio]:
+  turns semantic graph requirements into pacman packages and supplies the
+  foreign-system command paths the portable module deliberately cannot name.
 
 ### Scope
 
@@ -54,14 +57,16 @@ a toy demo or marketing page. As of this writing:
     `foreign-service` (declarative config over pacman systemd units),
     `gcroot-guard` (catches the activated-but-unregistered generation),
     `desktop-backend` (resolves nixdesktop roles into Arch packages),
+    `audio-backend` (resolves NixAudio roles and its transport bridge),
     `shelly` (nixarch's own opinionated package: a graphical pacman/AUR front-end),
     `cachyos-tools` (CachyOS's own update notifier, welcome app, kernel GUI and
     package installer, four independent `enable`s, distro-gated), and
     `cachyos-settings` (that distro's whole-system tuning profile, kept as a
     deliberate base layer under a host's own declarations).
   - **Home-manager layer:** `shell` (fish, starship, zoxide, fzf bundle),
-    `dev` (git config and direnv/nix-direnv integration), and `desktop`
-    (Arch spawn commands for nixdesktop's session components).
+    `dev` (git config and direnv/nix-direnv integration), `desktop`
+    (Arch spawn commands for nixdesktop's session components), and `audio`
+    (foreign-system command paths for NixAudio's user units).
 - Each module is real, working code with documented options. Not speculative;
   the patterns run daily in production.
 - Home-manager modules are lean and config-only; packages source from the
@@ -358,6 +363,35 @@ provider — its credential-based unlock stays configurable — while rendering 
 daemon of its own. Note also that Arch's `oo7` declares a hard `Conflicts With:
 gnome-keyring`, so swapping providers means removing the outgoing one first.
 
+### audio-backend
+
+[NixAudio][nixaudio] publishes the read-only semantic `nixaudio.want` contract and contains no
+Arch package name. This backend maps its graph, session policy, client protocols, diagnostics and
+firmware roles through [`lib/audio-roles.nix`](lib/audio-roles.nix), then feeds the result into the
+existing package reconciler. Its Home Manager companion supplies the distro client PATH.
+
+```nix
+# system-manager
+imports = [
+  inputs.nixaudio.systemManagerModules.nixaudio
+  inputs.nixarch.systemManagerModules.audio-backend
+  inputs.nixarch.systemManagerModules.packages
+];
+nixarch.audioBackend.enable = true;
+
+# Home Manager (a separate evaluation)
+imports = [
+  inputs.nixaudio.homeManagerModules.nixaudio
+  inputs.nixarch.homeManagerModules.audio
+];
+nixarch.home.audio.enable = true;
+```
+
+The backend deliberately uses nixpkgs' `pw-jack` for NixAudio's Nix-built JackTrip transport. Its
+RUNPATH names Nix's libjack, so the shim must be ABI-matched to the binary it redirects; the distro
+shim is correct for distro binaries but cannot perform that redirect. This adds no PipeWire daemon
+and continues to speak to the one already running on the host.
+
 ### shelly
 
 Shelly, a graphical package manager — a GTK4 front-end for pacman and the AUR (search,
@@ -452,8 +486,8 @@ Arch/CachyOS machines.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | Flake entry point; exports `systemManagerModules` (device-gids, gshadow-sync, packages, base-packages, foreign-service, logrotate, gcroot-guard, desktop-backend, shelly, cachyos-tools, cachyos-settings), `homeManagerModules` (shell, dev, desktop), and `nixosModules` (gshadow-sync). |
-| `lib/` | Pure data shared across module classes — `desktop-roles.nix` (Arch resolution tables for nixdesktop roles) and `host-path.nix` (the host PATH every unit driving pacman/nix needs). |
+| `flake.nix` | Flake entry point; exports system-manager, Home Manager, and NixOS module classes. |
+| `lib/` | Pure platform data: desktop/audio role resolution and host command paths. |
 | `experiments/` | Throwaway trials — see [`experiments/README.md`](experiments/README.md). |
 | `studies/` | Written-up findings — see [`studies/README.md`](studies/README.md). |
 | `site/` | The project page (`nixarch.corbet.ch`), vendored from the shared `design-corbet-ch` project-pages base. |
@@ -477,6 +511,7 @@ generates config, `desktop-backend` here resolves those roles into Arch
 packages. Either works without the other.
 
 [nixdesktop]: https://github.com/julian-corbet/nixdesktop-corbet-ch
+[nixaudio]: https://github.com/julian-corbet/nixaudio-corbet-ch
 [nixgpu]: https://github.com/julian-corbet/nixgpu-corbet-ch
 [nixdev]: https://github.com/julian-corbet/nixdev-corbet-ch
 

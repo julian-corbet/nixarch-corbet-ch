@@ -70,6 +70,11 @@
         # declares the `nixdesktop.want` option this reads.
         desktop-backend = ./modules/desktop-backend.nix;
 
+        # The Arch/CachyOS half of NixAudio: resolves the semantic `nixaudio.want` contract into
+        # pacman/AUR packages and supplies the ABI-matched Nix pw-jack transport shim. Import
+        # alongside NixAudio's system-manager module; NixAudio is deliberately not a flake input.
+        audio-backend = ./modules/audio-backend.nix;
+
         # Shelly, a graphical package manager (pacman/AUR GUI front-end) — nixarch's own
         # opinionated package, not a domain repo's; see modules/shelly.nix for the mechanism.
         shelly = ./modules/shelly.nix;
@@ -113,6 +118,10 @@
         # command that spawns it, so absolute binary paths stay out of consumers' personal
         # config. Shares its tables with modules/desktop-backend.nix via lib/desktop-roles.nix.
         desktop = ./home/desktop.nix;
+
+        # User-session command paths for NixAudio's Home Manager plane. Kept separate from the
+        # system backend because Home Manager and system-manager are independent evaluations.
+        audio = ./home/audio.nix;
       };
 
       # The eval-time regression net in ./checks. It was written, committed and NOT reachable
@@ -124,14 +133,15 @@
       # `nixpkgs` is passed explicitly rather than left to its `<nixpkgs>` default, which would
       # resolve through NIX_PATH — an impurity that makes the result depend on the invoking
       # machine's channels rather than this flake's lock.
-      # `nixdesktop = null` because nixarch does not take it as an input (see the input comment
-      # above, and R4): the two desktop-backend checks need a nixdesktop checkout, so they run
-      # only in the standalone invocation. The suite reports what it skipped rather than hiding it.
+      # Domain modules are null because nixarch does not take them as inputs (R4): the desktop and
+      # audio backend checks need sibling checkouts, so they run only in the standalone invocation.
+      # The suite reports what it skipped rather than hiding it.
       checks = forAllSystems (system:
         import ./checks {
           nixpkgs = nixpkgs.outPath;
           inherit system;
           nixdesktop = null;
+          nixaudio = null;
           # Unlike nixdesktop above, nixhost genuinely IS a flake input (see the input comment) --
           # so `nix flake check` gets the real, locked `nixhost.lib.probeFact` here, not a stub.
           probeFact = nixhost.lib.probeFact;

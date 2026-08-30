@@ -116,6 +116,11 @@ it. Stubbing it would only prove that this module writes the options it writes.
   *selected* provider — the state that keeps its credential-based unlock reachable — and that it
   never travels through nixdesktop's generic `command` escape hatch, which would render that
   duplicate unit *and* give a `Type=simple` daemon gnome-keyring's `forking` shape.
+- **`audio-backend` / `home-audio`** — the real NixAudio modules publish a semantic
+  `nixaudio.want`; the system backend resolves all current roles to the seven-package Arch floor,
+  keeps SOF firmware hardware-gated, and contributes no AUR package. Both independent evaluation
+  planes assert the proven ABI-matched Nix `pw-jack` + Nix-built JackTrip command, while the Home
+  Manager backend is the sole owner of the distro client PATH.
 - **`gcroot-guard`** — the check unit's PATH actually reaches `nix-store` (without it the check
   can't even run — the same PATH gap the module exists to catch); `failLoudly` flips the
   `ExecStart` `"-"` prefix; disabled ships no unit and no `nixarch-register` wrapper.
@@ -166,34 +171,28 @@ same treatment.
 
 ## Running
 
-Needs a `nixdesktop` checkout for the `desktop-backend` and `home-desktop` sections — defaults to
-a sibling clone (`../../nixdesktop`, i.e. `github/nixdesktop` next to `github/nixarch`), which is
-how these two repos are normally worked on together. Override with `--arg nixdesktop <path>` if
-yours lives elsewhere.
+Needs sibling `nixdesktop` and `nixaudio` checkouts for their paired backend sections. Override the
+defaults with `--arg nixdesktop <path>` or `--arg nixaudio <path>` when either lives elsewhere.
 
 ```console
 $ nix-instantiate --eval --strict -A eval-checks.passedCount checks
-"179"
+"187"
 ```
 
 A failing check throws before that derivation attribute even exists, with every failing check's
 name and a `got: ...` detail — not just the first one:
 
 ```
-error: nixarch eval-checks FAILED (1/179):
+error: nixarch eval-checks FAILED (1/187):
   - packages/prune-undeclared-defaults-off: got: true
 ```
 
 ## `nix flake check` runs a subset
 
-`flake.nix` wires this suite in as `checks.<system>.eval-checks`, passing `nixdesktop = null` — so
-`nix flake check` runs everything except the `desktop-backend` and `home-desktop` sections, and the
-result derivation records what it skipped rather than hiding it.
+`flake.nix` wires this suite in as `checks.<system>.eval-checks`, passing both domain checkouts as
+null. `nix flake check` therefore skips the desktop and audio backend sections, and the result
+derivation records that explicitly.
 
-That split is not laziness. `flake.nix`'s own header explains why `nixdesktop` isn't a flake input:
-those two sections need it in the same evaluation, and adding it as an input would force every
-consumer of nixarch — the many who use it without a desktop at all — to fetch it on every
-evaluation. The `nixdesktop` sibling-checkout default above is a filesystem path outside this
-flake's own source tree, which a real flake evaluation resolves against a copied, sandboxed store
-path rather than your working tree, so it cannot be reached from `nix flake check` at all. Run the
-standalone `nix-instantiate` invocation above to cover those two.
+That preserves the family contract: a hub reads each domain module's option values but does not
+take it as a flake input. The sibling-checkout defaults are outside the flake's copied source path,
+so the standalone `nix-instantiate` invocation is the cross-repository check.
