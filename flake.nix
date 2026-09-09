@@ -16,7 +16,7 @@
   # sees an ordinary module function and never needs to know `probeFact` exists.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.nixhost = {
-    url = "github:julian-corbet/nixhost-corbet-ch";
+    url = "git+https://github.com/julian-corbet/nixhost-corbet-ch";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 
